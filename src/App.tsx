@@ -37,9 +37,10 @@ import {
   getTipeJadwalLabel,
   getStatusInfo,
   exportToCSV,
+  generateJadwalBulanan,
 } from './utils/formatters';
 
-const STORAGE_KEY = 'proker_mobile_dpph_v7';
+const STORAGE_KEY = 'proker_mobile_dpph_v9';
 
 export default function App() {
   // 1. Data Store
@@ -60,6 +61,10 @@ export default function App() {
                     ...p,
                     modeTanggal: 'rutin_berkala',
                     tanggalSpesifik: 'Setiap Selasa pertama tiap bulan',
+                    jadwalBulanan:
+                      p.jadwalBulanan && Object.keys(p.jadwalBulanan).length > 0
+                        ? p.jadwalBulanan
+                        : generateJadwalBulanan(p.tahun || 2025, 'selasa_pertama'),
                     catatan:
                       'Dilaksanakan setiap hari Selasa pertama tiap bulan. PIC bertanggung jawab menyiapkan undangan, materi agenda rapat, konsumsi, dan notulensi.',
                   }
@@ -188,8 +193,12 @@ export default function App() {
   const handleTipeJadwalChange = (tipe: ScheduleType) => {
     setFormData((prev) => {
       let bulan = prev.bulanPelaksanaan || [];
+      let jadwalBln = prev.jadwalBulanan || {};
       if (tipe === 'sepanjang_tahun') {
         bulan = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        if (!jadwalBln || Object.keys(jadwalBln).length === 0) {
+          jadwalBln = generateJadwalBulanan(prev.tahun || 2025, 'selasa_pertama');
+        }
       } else if (tipe === 'satu_kali') {
         bulan = bulan.length > 0 ? [bulan[0]] : [1];
       } else {
@@ -201,9 +210,43 @@ export default function App() {
         ...prev,
         tipeJadwal: tipe,
         bulanPelaksanaan: bulan,
+        jadwalBulanan: jadwalBln,
       };
     });
     setHasUnsavedChanges(true);
+  };
+
+  // Monthly date input handler for each month
+  const handleJadwalBulananChange = (bulanNo: number, val: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      jadwalBulanan: {
+        ...(prev.jadwalBulanan || {}),
+        [bulanNo]: val,
+      },
+    }));
+    setHasUnsavedChanges(true);
+  };
+
+  // Auto-fill all 12 months with a recurring pattern
+  const handleAutoFillMonthlyDates = (
+    pola: 'selasa_pertama' | 'minggu_pertama' | 'tanggal_1' | 'tanggal_5' | 'tanggal_10' | 'tanggal_15'
+  ) => {
+    const targetYear = formData.tahun || 2025;
+    const generated = generateJadwalBulanan(targetYear, pola);
+    setFormData((prev) => ({
+      ...prev,
+      jadwalBulanan: generated,
+      modeTanggal: 'rutin_berkala',
+      tanggalSpesifik:
+        pola === 'selasa_pertama'
+          ? 'Setiap Selasa pertama tiap bulan'
+          : pola === 'minggu_pertama'
+          ? 'Setiap Minggu pertama tiap bulan'
+          : `Setiap tanggal ${pola.replace('tanggal_', '')} tiap bulan`,
+    }));
+    setHasUnsavedChanges(true);
+    showToast('Rencana tanggal 12 bulan berhasil diisi otomatis!');
   };
 
   // Month toggle for multi_bulan or satu_kali
@@ -234,6 +277,14 @@ export default function App() {
     if (!formData.penanggungjawab?.nama?.trim()) errors.pjNama = 'Nama PJ wajib diisi';
     if (!formData.bulanPelaksanaan || formData.bulanPelaksanaan.length === 0) {
       errors.bulanPelaksanaan = 'Pilih minimal 1 bulan pelaksanaan';
+    }
+    if (formData.tipeJadwal === 'sepanjang_tahun') {
+      const datesCount = Object.values(formData.jadwalBulanan || {}).filter((v) => v?.trim()).length;
+      if (datesCount === 0) {
+        // Auto fill if totally empty
+        const auto = generateJadwalBulanan(formData.tahun || 2025, 'selasa_pertama');
+        formData.jadwalBulanan = auto;
+      }
     }
 
     if (Object.keys(errors).length > 0) {
@@ -615,6 +666,21 @@ export default function App() {
             </div>
           ) : currentProgram ? (
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 space-y-4">
+              {/* Highlight Banner Saat Filter Bulan Tertentu Aktif */}
+              {selectedMonth !== 'all' && (
+                <div className="bg-emerald-50/90 border border-emerald-200 p-2.5 rounded-xl flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-emerald-950 font-bold min-w-0">
+                    <Calendar className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="truncate">
+                      Fokus Bulan {BULAN_LIST[(selectedMonth as number) - 1]?.nama} {formData.tahun}:
+                    </span>
+                  </div>
+                  <span className="font-bold text-emerald-900 bg-white px-2 py-0.5 rounded-md border border-emerald-200 shrink-0 ml-2">
+                    {formData.jadwalBulanan?.[selectedMonth as number] || formData.tanggalSpesifik || 'Belum diisi'}
+                  </span>
+                </div>
+              )}
+
               {/* Form Bar: Tahun, Status, & Quick Actions */}
               <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
                 {/* Tahun Toggle for current Program */}
@@ -815,15 +881,96 @@ export default function App() {
 
                 {/* Sub-UI: Sepanjang Tahun */}
                 {formData.tipeJadwal === 'sepanjang_tahun' && (
-                  <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>Kegiatan berlangsung kontinyu/rutin selama 12 bulan penuh (Januari – Desember).</span>
+                  <div className="space-y-2.5">
+                    <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Kegiatan berlangsung kontinyu/rutin selama 12 bulan penuh (Januari – Desember).</span>
+                    </div>
+
+                    {/* Input Rencana Tanggal Tiap Bulan */}
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-800">
+                            Tanggal Rencana Pelaksanaan Tiap Bulan <span className="text-rose-500">*</span>
+                          </label>
+                          <p className="text-[10px] text-slate-500">
+                            Input tanggal rencana untuk 12 bulan (Januari s/d Desember {formData.tahun})
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Tombol Pintas Isi Otomatis */}
+                      <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+                        <span className="text-[10px] text-slate-400 font-semibold shrink-0">Otomatisasi:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleAutoFillMonthlyDates('selasa_pertama')}
+                          className="px-2 py-1 rounded-md text-[10px] font-bold bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs shrink-0"
+                          title="Generate Selasa pertama setiap bulan"
+                        >
+                          ⚡ Selasa Pertama
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAutoFillMonthlyDates('minggu_pertama')}
+                          className="px-2 py-1 rounded-md text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 shrink-0"
+                        >
+                          ⚡ Minggu Pertama
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAutoFillMonthlyDates('tanggal_1')}
+                          className="px-2 py-1 rounded-md text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 shrink-0"
+                        >
+                          ⚡ Tgl 1
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAutoFillMonthlyDates('tanggal_5')}
+                          className="px-2 py-1 rounded-md text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 shrink-0"
+                        >
+                          ⚡ Tgl 5
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAutoFillMonthlyDates('tanggal_10')}
+                          className="px-2 py-1 rounded-md text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 shrink-0"
+                        >
+                          ⚡ Tgl 10
+                        </button>
+                      </div>
+
+                      {/* 12 Bulan Input Fields */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1">
+                        {BULAN_LIST.map((b) => {
+                          const val = formData.jadwalBulanan?.[b.no] || '';
+                          return (
+                            <div
+                              key={b.no}
+                              className="flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200"
+                            >
+                              <span className="w-16 text-[11px] font-bold text-slate-700 shrink-0">
+                                {b.nama}:
+                              </span>
+                              <input
+                                type="text"
+                                value={val}
+                                onChange={(e) => handleJadwalBulananChange(b.no, e.target.value)}
+                                placeholder={`Rencana tgl ${b.singkatan} ${formData.tahun}`}
+                                className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-slate-900 font-semibold focus:outline-none focus:border-slate-400 focus:bg-white"
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 )}
 
                 {/* Sub-UI: Multi Bulan Terjadwal */}
                 {formData.tipeJadwal === 'multi_bulan' && (
-                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2">
+                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2.5">
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="font-bold text-slate-700">
                         Pilih Bulan Terjadwal ({formData.bulanPelaksanaan?.length || 0} bulan terpilih):
@@ -892,6 +1039,38 @@ export default function App() {
                         );
                       })}
                     </div>
+
+                    {/* Input Tanggal untuk Bulan Terpilih */}
+                    {formData.bulanPelaksanaan && formData.bulanPelaksanaan.length > 0 && (
+                      <div className="pt-2 border-t border-slate-200 space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-700">
+                          Tanggal Rencana Pelaksanaan Bulan Terpilih:
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[220px] overflow-y-auto">
+                          {formData.bulanPelaksanaan.map((mNo) => {
+                            const bObj = BULAN_LIST[mNo - 1];
+                            const val = formData.jadwalBulanan?.[mNo] || '';
+                            return (
+                              <div
+                                key={mNo}
+                                className="flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-slate-200"
+                              >
+                                <span className="w-16 text-[11px] font-bold text-slate-700 shrink-0">
+                                  {bObj?.nama}:
+                                </span>
+                                <input
+                                  type="text"
+                                  value={val}
+                                  onChange={(e) => handleJadwalBulananChange(mNo, e.target.value)}
+                                  placeholder={`Rencana tgl ${bObj?.singkatan} ${formData.tahun}`}
+                                  className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-slate-900 font-semibold focus:outline-none focus:border-slate-400 focus:bg-white"
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

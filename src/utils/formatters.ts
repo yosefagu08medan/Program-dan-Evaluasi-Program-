@@ -55,6 +55,34 @@ export function parseRupiahInput(val: string): number {
   return cleaned ? parseInt(cleaned, 10) : 0;
 }
 
+export function generateJadwalBulanan(
+  tahun: number,
+  pola: 'selasa_pertama' | 'minggu_pertama' | 'tanggal_1' | 'tanggal_5' | 'tanggal_10' | 'tanggal_15'
+): Record<number, string> {
+  const result: Record<number, string> = {};
+  for (let m = 1; m <= 12; m++) {
+    const namaBulan = BULAN_LIST[m - 1]?.nama || '';
+    if (pola === 'selasa_pertama') {
+      const firstDay = new Date(tahun, m - 1, 1).getDay();
+      const tgl = ((2 - firstDay + 7) % 7) + 1;
+      result[m] = `${tgl} ${namaBulan} ${tahun}`;
+    } else if (pola === 'minggu_pertama') {
+      const firstDay = new Date(tahun, m - 1, 1).getDay();
+      const tgl = ((0 - firstDay + 7) % 7) + 1;
+      result[m] = `${tgl} ${namaBulan} ${tahun}`;
+    } else if (pola === 'tanggal_1') {
+      result[m] = `1 ${namaBulan} ${tahun}`;
+    } else if (pola === 'tanggal_5') {
+      result[m] = `5 ${namaBulan} ${tahun}`;
+    } else if (pola === 'tanggal_10') {
+      result[m] = `10 ${namaBulan} ${tahun}`;
+    } else if (pola === 'tanggal_15') {
+      result[m] = `15 ${namaBulan} ${tahun}`;
+    }
+  }
+  return result;
+}
+
 export function getTipeJadwalLabel(type: ScheduleType): string {
   switch (type) {
     case 'sepanjang_tahun':
