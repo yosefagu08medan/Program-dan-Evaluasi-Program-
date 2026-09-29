@@ -39,7 +39,7 @@ import {
   exportToCSV,
 } from './utils/formatters';
 
-const STORAGE_KEY = 'proker_mobile_data_v2';
+const STORAGE_KEY = 'proker_mobile_dpph_v7';
 
 export default function App() {
   // 1. Data Store
@@ -48,7 +48,25 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // If previous storage contained the old dummy data, clear it and use new DPPH data
+          const hasOldDummy = parsed.some(
+            (p) => p.id === 'proker-2025-01' || p.penanggungjawab?.nama?.includes('Budi Santoso')
+          );
+          if (!hasOldDummy) {
+            return parsed.map((p) =>
+              p.id === 'proker-dpph-01'
+                ? {
+                    ...p,
+                    modeTanggal: 'rutin_berkala',
+                    tanggalSpesifik: 'Setiap Selasa pertama tiap bulan',
+                    catatan:
+                      'Dilaksanakan setiap hari Selasa pertama tiap bulan. PIC bertanggung jawab menyiapkan undangan, materi agenda rapat, konsumsi, dan notulensi.',
+                  }
+                : p
+            );
+          }
+        }
       }
     } catch (e) {
       console.error('Error loading saved proker:', e);
@@ -254,6 +272,8 @@ export default function App() {
       estimasiAnggaran: 10000000,
       tipeJadwal: selectedMonth === 'all' ? 'multi_bulan' : 'satu_kali',
       bulanPelaksanaan: initialBulan,
+      modeTanggal: 'akan_ditentukan',
+      tanggalSpesifik: 'Tanggal akan ditentukan kemudian (Tentatif)',
       penanggungjawab: {
         nama: '',
         divisi: DAFTAR_DIVISI[0],
@@ -531,7 +551,7 @@ export default function App() {
                   ) : (
                     filteredPrograms.map((p, idx) => (
                       <option key={p.id} value={p.id}>
-                        {idx + 1}. [{p.tahun}] {p.namaProgram} - {formatRupiah(p.estimasiAnggaran)}
+                        {idx + 1}. [{p.tahun}] {p.namaProgram} · {p.modeTanggal === 'akan_ditentukan' ? '(Tanggal Tentatif)' : (p.tanggalSpesifik || formatRupiah(p.estimasiAnggaran))}
                       </option>
                     ))
                   )}
@@ -797,7 +817,7 @@ export default function App() {
                 {formData.tipeJadwal === 'sepanjang_tahun' && (
                   <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
                     <Clock className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>Kegiatan berlangsung kontinyu selama 12 bulan penuh (Jan – Des).</span>
+                    <span>Kegiatan berlangsung kontinyu/rutin selama 12 bulan penuh (Januari – Desember).</span>
                   </div>
                 )}
 
@@ -877,52 +897,168 @@ export default function App() {
 
                 {/* Sub-UI: Satu Kali Pelaksanaan */}
                 {formData.tipeJadwal === 'satu_kali' && (
-                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                          Bulan Pelaksanaan:
-                        </label>
-                        <select
-                          value={formData.bulanPelaksanaan?.[0] || 1}
-                          onChange={(e) => {
-                            setFormData((prev) => ({
-                              ...prev,
-                              bulanPelaksanaan: [parseInt(e.target.value, 10)],
-                            }));
-                            setHasUnsavedChanges(true);
-                          }}
-                          className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800"
-                        >
-                          {BULAN_LIST.map((m) => (
-                            <option key={m.no} value={m.no}>
-                              Bulan {m.nama}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                          Tanggal / Jadwal Spesifik:
-                        </label>
-                        <input
-                          type="text"
-                          value={formData.tanggalSpesifik || ''}
-                          onChange={(e) => {
-                            setFormData((prev) => ({
-                              ...prev,
-                              tanggalSpesifik: e.target.value,
-                            }));
-                            setHasUnsavedChanges(true);
-                          }}
-                          placeholder="Misal: 17 Agustus / Pekan ke-2"
-                          className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800"
-                        />
-                      </div>
-                    </div>
+                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Bulan Pelaksanaan Kegiatan:
+                    </label>
+                    <select
+                      value={formData.bulanPelaksanaan?.[0] || 1}
+                      onChange={(e) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          bulanPelaksanaan: [parseInt(e.target.value, 10)],
+                        }));
+                        setHasUnsavedChanges(true);
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800"
+                    >
+                      {BULAN_LIST.map((m) => (
+                        <option key={m.no} value={m.no}>
+                          Bulan {m.nama}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 )}
+
+                {/* Sub-UI: Kepastian Tanggal Pelaksanaan */}
+                <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-800">
+                      Kepastian Tanggal Pelaksanaan:
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      Pilih kepastian tanggal
+                    </span>
+                  </div>
+
+                  {/* 3 Opsi: Tanggal Tertentu / Akan Ditentukan Kemudian / Rutin Berkala */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                    {[
+                      {
+                        id: 'tanggal_pasti',
+                        title: 'Tanggal Tertentu',
+                        desc: 'Sudah ada tanggal tertentu',
+                      },
+                      {
+                        id: 'akan_ditentukan',
+                        title: 'Ditentukan Kemudian',
+                        desc: 'Jadwal tanggal tentatif / TBD',
+                      },
+                      {
+                        id: 'rutin_berkala',
+                        title: 'Rutin Berkala',
+                        desc: 'Hari tertentu (misal: Selasa ke-1)',
+                      },
+                    ].map((opt) => {
+                      const isSelected = (formData.modeTanggal || 'rutin_berkala') === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            let newTgl = formData.tanggalSpesifik || '';
+                            if (opt.id === 'akan_ditentukan') {
+                              newTgl = 'Tanggal akan ditentukan kemudian (Tentatif)';
+                            } else if (opt.id === 'rutin_berkala' && (!newTgl || newTgl.includes('kemudian'))) {
+                              newTgl = 'Setiap Selasa pertama tiap bulan';
+                            } else if (opt.id === 'tanggal_pasti' && (!newTgl || newTgl.includes('kemudian') || newTgl.includes('Selasa'))) {
+                              newTgl = '';
+                            }
+                            setFormData((prev) => ({
+                              ...prev,
+                              modeTanggal: opt.id as any,
+                              tanggalSpesifik: newTgl,
+                            }));
+                            setHasUnsavedChanges(true);
+                          }}
+                          className={`text-left p-2 rounded-lg border transition-all ${
+                            isSelected
+                              ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          <p className="text-xs font-bold leading-tight">{opt.title}</p>
+                          <p className={`text-[9px] mt-0.5 ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
+                            {opt.desc}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Input detail sesuai opsi tanggal terpilih */}
+                  {formData.modeTanggal === 'akan_ditentukan' ? (
+                    <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                      <span className="text-sm mt-0.5">⏳</span>
+                      <div>
+                        <p className="font-bold">Tanggal akan ditentukan kemudian (Tentatif)</p>
+                        <p className="text-[11px] text-amber-700 mt-0.5">
+                          Bulan kegiatan telah direncanakan, tanggal pasti pelaksanaan akan ditetapkan kemudian setelah koordinasi pengurus.
+                        </p>
+                      </div>
+                    </div>
+                  ) : formData.modeTanggal === 'rutin_berkala' ? (
+                    <div className="space-y-1.5 pt-1">
+                      <label className="block text-[11px] font-bold text-slate-700">
+                        Pola Pelaksanaan Rutin:
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.tanggalSpesifik || ''}
+                        onChange={(e) => {
+                          setFormData((prev) => ({ ...prev, tanggalSpesifik: e.target.value }));
+                          setHasUnsavedChanges(true);
+                        }}
+                        placeholder="Contoh: Setiap Selasa pertama tiap bulan"
+                        className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-slate-400"
+                      />
+                      {/* Quick Chips */}
+                      <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                        <span className="text-[10px] text-slate-400 font-medium">Pilihan cepat:</span>
+                        {[
+                          'Setiap Selasa pertama tiap bulan',
+                          'Setiap Minggu pertama tiap bulan',
+                          'Setiap hari Sabtu ke-2',
+                          'Hari Jumat terakhir tiap bulan',
+                        ].map((chip) => (
+                          <button
+                            key={chip}
+                            type="button"
+                            onClick={() => {
+                              setFormData((prev) => ({ ...prev, tanggalSpesifik: chip }));
+                              setHasUnsavedChanges(true);
+                            }}
+                            className={`px-2 py-0.5 text-[10px] font-semibold rounded-md border transition-colors ${
+                              formData.tanggalSpesifik === chip
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Tanggal Tertentu */
+                    <div className="space-y-1.5 pt-1">
+                      <label className="block text-[11px] font-bold text-slate-700">
+                        Tanggal Tertentu yang Ditentukan:
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.tanggalSpesifik || ''}
+                        onChange={(e) => {
+                          setFormData((prev) => ({ ...prev, tanggalSpesifik: e.target.value }));
+                          setHasUnsavedChanges(true);
+                        }}
+                        placeholder="Contoh: 15 Maret 2025 / Tanggal 1 s/d 3 / Pekan ke-2"
+                        className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-slate-400"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* FIELD 6: PENANGGUNG JAWAB (PIC) */}
@@ -946,7 +1082,7 @@ export default function App() {
                         }));
                         setHasUnsavedChanges(true);
                       }}
-                      placeholder="Nama Lengkap PJ"
+                      placeholder="Nama PIC (Contoh: Yosef dan Putut sebagai Sekretaris 1 dan Sekretaris 2)"
                       className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none ${
                         formErrors.pjNama ? 'border-rose-400' : 'border-slate-200 focus:border-slate-400'
                       }`}

@@ -16,14 +16,15 @@ export const BULAN_LIST = [
 ];
 
 export const DAFTAR_DIVISI = [
+  'Sekretariat / DPPH',
+  'Dewan Pengurus Harian (DPPH)',
+  'Bidang Liturgi & Peribadatan',
+  'Bidang Pewartaan & Katekese',
+  'Bidang Pelayanan & Sosial (PSE)',
+  'Bidang Paguyuban & Komunitas',
   'Umum & Operasional',
-  'SDM & Pengembangan',
-  'IT & Transformasi Digital',
-  'Pemasaran & Kemitraan',
   'Keuangan & Anggaran',
-  'Humas & Komunikasi Publik',
-  'Sosial & Kemasyarakatan',
-  'Litbang & Inovasi',
+  'Pengembangan SDM & Kerumahtanggaan',
 ];
 
 export function formatRupiah(amount: number): string {
@@ -95,6 +96,16 @@ export function getStatusInfo(status: ProgramStatus) {
         dot: 'bg-sky-500',
       };
   }
+}
+
+export function getTanggalPelaksanaanLabel(program: { modeTanggal?: string; tanggalSpesifik?: string }): string {
+  if (program.modeTanggal === 'akan_ditentukan') {
+    return 'Tanggal akan ditentukan kemudian (Tentatif)';
+  }
+  if (program.tanggalSpesifik) {
+    return program.tanggalSpesifik;
+  }
+  return 'Belum ditentukan';
 }
 
 export function formatBulanPelaksanaan(bulanList: number[]): string {

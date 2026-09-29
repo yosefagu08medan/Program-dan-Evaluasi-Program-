@@ -2,6 +2,8 @@ export type ScheduleType = 'sepanjang_tahun' | 'multi_bulan' | 'satu_kali';
 
 export type ProgramStatus = 'direncanakan' | 'berjalan' | 'selesai' | 'ditunda';
 
+export type ModeTanggal = 'tanggal_pasti' | 'akan_ditentukan' | 'rutin_berkala';
+
 export interface PenanggungJawab {
   nama: string;
   divisi: string;
@@ -17,7 +19,8 @@ export interface ProgramKerja {
   estimasiAnggaran: number;
   tipeJadwal: ScheduleType;
   bulanPelaksanaan: number[]; // 1 = Januari, ..., 12 = Desember
-  tanggalSpesifik?: string; // e.g. "17 Agustus 2025" or "Minggu ke-2"
+  modeTanggal?: ModeTanggal; // 'tanggal_pasti' | 'akan_ditentukan' | 'rutin_berkala'
+  tanggalSpesifik?: string; // e.g. "Setiap Selasa pertama tiap bulan", "15 Agustus 2025", or "Akan ditentukan kemudian"
   penanggungjawab: PenanggungJawab;
   status: ProgramStatus;
   catatan?: string;
