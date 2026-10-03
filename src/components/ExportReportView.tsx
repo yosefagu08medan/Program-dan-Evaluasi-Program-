@@ -36,7 +36,7 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(programs, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `backup_proker_2025_2026_${new Date().toISOString().slice(0, 10)}.json`);
+    downloadAnchor.setAttribute('download', `backup_proker_2026_2027_${new Date().toISOString().slice(0, 10)}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -146,7 +146,7 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
           <button
             type="button"
             onClick={() => {
-              if (window.confirm('Kembalikan ke data contoh awal tahun 2025 dan 2026?')) {
+              if (window.confirm('Kembalikan ke data contoh awal tahun 2026 dan 2027?')) {
                 onResetData();
               }
             }}
@@ -163,7 +163,7 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
         {/* Document Header (KOP Surat / Judul Resmi) */}
         <div className="text-center pb-4 mb-4 border-b-2 border-slate-900">
           <h2 className="text-base sm:text-lg font-extrabold text-slate-900 uppercase tracking-wide">
-            RENCANA PROGRAM KERJA OPERASIONAL TAHUN 2025 - 2026
+            RENCANA PROGRAM KERJA OPERASIONAL TAHUN 2026 - 2027
           </h2>
           <p className="text-xs text-slate-600 mt-1">
             Matriks Sasaran, Estimasi Anggaran, Jadwal Pelaksanaan, dan Penanggung Jawab
@@ -201,7 +201,7 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
                   <td className="py-2.5 px-2 text-center font-semibold">
                     <span
                       className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                        p.tahun === 2025 ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
+                        p.tahun === 2026 ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
                       }`}
                     >
                       {p.tahun}

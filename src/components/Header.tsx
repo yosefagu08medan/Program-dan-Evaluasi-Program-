@@ -85,21 +85,9 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Year Selector Tabs (2025 | 2026 | Semua) */}
+        {/* Year Selector Tabs (2026 | 2027 | Semua) */}
         <div className="mt-3 flex items-center justify-between gap-2">
           <div className="flex-1 p-1 bg-slate-100 rounded-xl flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setFilterOptions((prev) => ({ ...prev, tahun: 2025 }))}
-              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                filterOptions.tahun === 2025
-                  ? 'bg-white text-slate-900 shadow-sm border border-slate-200/50'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Tahun 2025
-            </button>
-
             <button
               type="button"
               onClick={() => setFilterOptions((prev) => ({ ...prev, tahun: 2026 }))}
@@ -110,6 +98,18 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               Tahun 2026
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFilterOptions((prev) => ({ ...prev, tahun: 2027 }))}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                filterOptions.tahun === 2027
+                  ? 'bg-white text-slate-900 shadow-sm border border-slate-200/50'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Tahun 2027
             </button>
 
             <button

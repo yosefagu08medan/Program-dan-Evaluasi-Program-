@@ -1,6 +1,6 @@
 {
   "name": "Proker Mobile 2025-2026",
-  "description": "Aplikasi Perencanaan Program Kerja Tahun 2025 dan 2026 untuk Mobile, dilengkapi estimasi anggaran, multi-jadwal, dan penanggung jawab.",
+  "description": "Aplikasi Perencanaan Program Kerja Paroki Katedral Medan Tahun 2026 dan 2027 untuk Mobile, dilengkapi estimasi anggaran, multi-jadwal, dan penanggung jawab.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

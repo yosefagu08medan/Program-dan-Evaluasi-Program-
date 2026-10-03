@@ -38,9 +38,11 @@ import {
   getStatusInfo,
   exportToCSV,
   generateJadwalBulanan,
+  formatIndonesianDate,
+  toISODateString,
 } from './utils/formatters';
 
-const STORAGE_KEY = 'proker_mobile_dpph_v9';
+const STORAGE_KEY = 'proker_katedral_medan_2026_2027_v12';
 
 export default function App() {
   // 1. Data Store
@@ -59,12 +61,13 @@ export default function App() {
               p.id === 'proker-dpph-01'
                 ? {
                     ...p,
+                    tahun: p.tahun === 2025 ? 2026 : p.tahun,
                     modeTanggal: 'rutin_berkala',
                     tanggalSpesifik: 'Setiap Selasa pertama tiap bulan',
                     jadwalBulanan:
                       p.jadwalBulanan && Object.keys(p.jadwalBulanan).length > 0
                         ? p.jadwalBulanan
-                        : generateJadwalBulanan(p.tahun || 2025, 'selasa_pertama'),
+                        : generateJadwalBulanan(p.tahun || 2026, 'selasa_pertama'),
                     catatan:
                       'Dilaksanakan setiap hari Selasa pertama tiap bulan. PIC bertanggung jawab menyiapkan undangan, materi agenda rapat, konsumsi, dan notulensi.',
                   }
@@ -89,7 +92,7 @@ export default function App() {
   }, [programs]);
 
   // 2. Filters (Tahun & Bulan Kegiatan)
-  const [selectedYear, setSelectedYear] = useState<'all' | 2025 | 2026>('all');
+  const [selectedYear, setSelectedYear] = useState<'all' | 2026 | 2027>('all');
   const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all'); // Filter berdasarkan bulan kegiatan
   const [isMobileDeviceFrame, setIsMobileDeviceFrame] = useState<boolean>(false);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
@@ -197,7 +200,7 @@ export default function App() {
       if (tipe === 'sepanjang_tahun') {
         bulan = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         if (!jadwalBln || Object.keys(jadwalBln).length === 0) {
-          jadwalBln = generateJadwalBulanan(prev.tahun || 2025, 'selasa_pertama');
+          jadwalBln = generateJadwalBulanan(prev.tahun || 2026, 'selasa_pertama');
         }
       } else if (tipe === 'satu_kali') {
         bulan = bulan.length > 0 ? [bulan[0]] : [1];
@@ -232,7 +235,7 @@ export default function App() {
   const handleAutoFillMonthlyDates = (
     pola: 'selasa_pertama' | 'minggu_pertama' | 'tanggal_1' | 'tanggal_5' | 'tanggal_10' | 'tanggal_15'
   ) => {
-    const targetYear = formData.tahun || 2025;
+    const targetYear = formData.tahun || 2026;
     const generated = generateJadwalBulanan(targetYear, pola);
     setFormData((prev) => ({
       ...prev,
@@ -282,7 +285,7 @@ export default function App() {
       const datesCount = Object.values(formData.jadwalBulanan || {}).filter((v) => v?.trim()).length;
       if (datesCount === 0) {
         // Auto fill if totally empty
-        const auto = generateJadwalBulanan(formData.tahun || 2025, 'selasa_pertama');
+        const auto = generateJadwalBulanan(formData.tahun || 2026, 'selasa_pertama');
         formData.jadwalBulanan = auto;
       }
     }
@@ -311,7 +314,7 @@ export default function App() {
 
   // Create new program in place
   const handleAddNew = () => {
-    const targetTahun = selectedYear === 'all' ? 2025 : selectedYear;
+    const targetTahun = selectedYear === 'all' ? 2026 : selectedYear;
     const initialBulan = selectedMonth === 'all' ? [1, 2, 3] : [selectedMonth];
     const newId = `proker-${Date.now()}`;
     const newProg: ProgramKerja = {
@@ -372,16 +375,20 @@ export default function App() {
     }
   };
 
-  // Month counts calculation for month filter tabs
-  const monthCounts = useMemo(() => {
-    const yearFiltered = programs.filter((p) =>
+  // Programs in selected year
+  const programsInSelectedYear = useMemo(() => {
+    return programs.filter((p) =>
       selectedYear === 'all' ? true : p.tahun === selectedYear
     );
+  }, [programs, selectedYear]);
+
+  // Month counts calculation for month filter tabs
+  const monthCounts = useMemo(() => {
     return BULAN_LIST.map((m) => {
-      const count = yearFiltered.filter((p) => p.bulanPelaksanaan?.includes(m.no)).length;
+      const count = programsInSelectedYear.filter((p) => p.bulanPelaksanaan?.includes(m.no)).length;
       return { ...m, count };
     });
-  }, [programs, selectedYear]);
+  }, [programsInSelectedYear]);
 
   // Overall budget summary
   const totalAnggaran = useMemo(() => {
@@ -425,22 +432,24 @@ export default function App() {
         {/* 1. HEADER (1 Layar) */}
         <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 pt-3 pb-2.5 space-y-2.5">
           {/* Top Brand & Actions */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+          <div className="flex items-start justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0 flex-1">
+              <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs mt-0.5">
                 <Calendar className="w-4 h-4 text-emerald-400" />
               </div>
-              <div className="min-w-0">
-                <h1 className="text-sm font-bold text-slate-900 leading-tight truncate">
-                  Proker 1 Layar
+              <div className="min-w-0 flex-1">
+                <h1 className="text-xs sm:text-sm font-extrabold text-slate-900 leading-snug">
+                  Program Kerja Paroki St Perawan Maria Yang Dikandung Tanpa Noda Katedral Keuskupan Agung Medan
                 </h1>
-                <p className="text-[10px] text-slate-500 font-medium">
-                  Rencana Kerja 2025 & 2026
+                <p className="text-[10px] text-emerald-700 font-semibold mt-0.5">
+                  {selectedYear === 'all'
+                    ? 'Tahun Anggaran 2026 & 2027'
+                    : `Tahun Anggaran ${selectedYear}`}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
               {/* Export CSV Button */}
               <button
                 type="button"
@@ -478,92 +487,64 @@ export default function App() {
             </div>
           </div>
 
-          {/* Tahun Selector Segment (2025 | 2026 | Semua Tahun) */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-bold text-slate-500 shrink-0">Tahun:</span>
-            <div className="flex-1 p-0.5 bg-slate-100 rounded-lg flex items-center gap-0.5">
-              {[
-                { id: 'all', label: 'Semua' },
-                { id: 2025, label: '2025' },
-                { id: 2026, label: '2026' },
-              ].map((yr) => (
-                <button
-                  key={yr.id}
-                  type="button"
-                  onClick={() => setSelectedYear(yr.id as 'all' | 2025 | 2026)}
-                  className={`flex-1 py-1 text-xs font-bold rounded-md transition-all ${
-                    selectedYear === yr.id
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
+          {/* FILTER DRAGDOWN: PILIHAN TAHUN & PILIHAN BULAN */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+            {/* 1. Dragdown Pilihan Tahun Anggaran */}
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                Pilihan Tahun Anggaran:
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedYear}
+                  onChange={(e) => {
+                    const val = e.target.value === 'all' ? 'all' : (parseInt(e.target.value, 10) as 2026 | 2027);
+                    setSelectedYear(val);
+                  }}
+                  className="w-full h-9 bg-white border border-slate-300 rounded-lg px-2.5 pr-7 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-500 cursor-pointer shadow-2xs"
                 >
-                  {yr.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 2. FILTER BERDASARKAN BULAN KEGIATAN (Horizontal Touch Bar) */}
-          <div>
-            <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 mb-1">
-              <span className="flex items-center gap-1">
-                <Filter className="w-3 h-3 text-emerald-600" />
-                <span>Filter Bulan Kegiatan:</span>
-              </span>
-              {selectedMonth !== 'all' && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedMonth('all')}
-                  className="text-emerald-700 hover:underline font-semibold"
-                >
-                  Reset ke Semua Bulan
-                </button>
-              )}
+                  <option value="all">Semua Tahun (2026 & 2027)</option>
+                  <option value={2026}>Tahun Anggaran 2026</option>
+                  <option value={2027}>Tahun Anggaran 2027</option>
+                </select>
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
+              </div>
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-              {/* Option: Semua Bulan */}
-              <button
-                type="button"
-                onClick={() => setSelectedMonth('all')}
-                className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-xs font-bold border transition-all shrink-0 ${
-                  selectedMonth === 'all'
-                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                Semua Bulan
-              </button>
-
-              {/* 12 Months Tabs with Live Proker Counts */}
-              {monthCounts.map((m) => {
-                const isSelected = selectedMonth === m.no;
-                return (
+            {/* 2. Dragdown Pilihan Bulan Kegiatan */}
+            <div>
+              <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                <span>Pilihan Bulan Kegiatan:</span>
+                {selectedMonth !== 'all' && (
                   <button
-                    key={m.no}
                     type="button"
-                    onClick={() => setSelectedMonth(m.no)}
-                    className={`whitespace-nowrap px-2 py-1 rounded-lg text-xs font-bold border transition-all flex items-center gap-1 shrink-0 ${
-                      isSelected
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
+                    onClick={() => setSelectedMonth('all')}
+                    className="text-emerald-700 hover:underline normal-case font-bold"
                   >
-                    <span>{m.singkatan}</span>
-                    <span
-                      className={`text-[9px] px-1 py-0.2 rounded-full tabular-nums ${
-                        isSelected
-                          ? 'bg-emerald-700 text-white'
-                          : m.count > 0
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-slate-100 text-slate-400'
-                      }`}
-                    >
-                      {m.count}
-                    </span>
+                    Reset Semua
                   </button>
-                );
-              })}
+                )}
+              </div>
+              <div className="relative">
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => {
+                    const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10);
+                    setSelectedMonth(val);
+                  }}
+                  className="w-full h-9 bg-white border border-slate-300 rounded-lg px-2.5 pr-7 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-500 cursor-pointer shadow-2xs"
+                >
+                  <option value="all">
+                    Semua Bulan (Januari – Desember) · {programsInSelectedYear.length} Program
+                  </option>
+                  {monthCounts.map((m) => (
+                    <option key={m.no} value={m.no}>
+                      Bulan {m.nama} · ({m.count} Program)
+                    </option>
+                  ))}
+                </select>
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
+              </div>
             </div>
           </div>
 
@@ -602,7 +583,7 @@ export default function App() {
                   ) : (
                     filteredPrograms.map((p, idx) => (
                       <option key={p.id} value={p.id}>
-                        {idx + 1}. [{p.tahun}] {p.namaProgram} · {p.modeTanggal === 'akan_ditentukan' ? '(Tanggal Tentatif)' : (p.tanggalSpesifik || formatRupiah(p.estimasiAnggaran))}
+                        {idx + 1}. [{p.tahun}] {p.namaProgram} · {formatRupiah(p.estimasiAnggaran)}
                       </option>
                     ))
                   )}
@@ -676,45 +657,32 @@ export default function App() {
                     </span>
                   </div>
                   <span className="font-bold text-emerald-900 bg-white px-2 py-0.5 rounded-md border border-emerald-200 shrink-0 ml-2">
-                    {formData.jadwalBulanan?.[selectedMonth as number] || formData.tanggalSpesifik || 'Belum diisi'}
+                    {formatIndonesianDate(
+                      formData.jadwalBulanan?.[selectedMonth as number] || formData.tanggalSpesifik
+                    ) || 'Belum dipilih'}
                   </span>
                 </div>
               )}
 
               {/* Form Bar: Tahun, Status, & Quick Actions */}
               <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
-                {/* Tahun Toggle for current Program */}
+                {/* Dragdown Pilihan Tahun Program */}
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-slate-500 font-semibold">Tahun:</span>
-                  <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFormData((prev) => ({ ...prev, tahun: 2025 }));
+                  <span className="text-[11px] text-slate-600 font-bold">Tahun:</span>
+                  <div className="relative">
+                    <select
+                      value={formData.tahun || 2026}
+                      onChange={(e) => {
+                        const newTahun = parseInt(e.target.value, 10) as 2026 | 2027;
+                        setFormData((prev) => ({ ...prev, tahun: newTahun }));
                         setHasUnsavedChanges(true);
                       }}
-                      className={`px-2 py-0.5 text-xs font-bold rounded-md transition-colors ${
-                        formData.tahun === 2025
-                          ? 'bg-blue-600 text-white shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
+                      className="h-8 bg-slate-50 border border-slate-300 rounded-lg pl-2.5 pr-7 text-xs font-bold text-slate-800 cursor-pointer focus:outline-none focus:border-slate-500 shadow-2xs"
                     >
-                      2025
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFormData((prev) => ({ ...prev, tahun: 2026 }));
-                        setHasUnsavedChanges(true);
-                      }}
-                      className={`px-2 py-0.5 text-xs font-bold rounded-md transition-colors ${
-                        formData.tahun === 2026
-                          ? 'bg-purple-600 text-white shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      2026
-                    </button>
+                      <option value={2026}>2026</option>
+                      <option value={2027}>2027</option>
+                    </select>
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
                   </div>
                 </div>
 
@@ -831,21 +799,6 @@ export default function App() {
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs font-bold text-slate-900 tabular-nums focus:outline-none focus:border-slate-400"
                   />
                 </div>
-
-                {/* Quick Budget Chips */}
-                <div className="mt-1.5 flex items-center gap-1 flex-wrap">
-                  <span className="text-[10px] text-slate-400 font-semibold">Cepat:</span>
-                  {[5000000, 10000000, 25000000, 50000000, 100000000].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => handleQuickBudgetPreset(preset)}
-                      className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
-                    >
-                      {preset >= 1000000 ? `${preset / 1000000} Jt` : `${preset / 1000} Rb`}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               {/* FIELD 5: JADWAL PELAKSANAAN (3 Pilihan: Sepanjang Tahun, Multi Bulan Terjadwal, Satu Kali Pelaksanaan) */}
@@ -854,29 +807,23 @@ export default function App() {
                   5. Jadwal Pelaksanaan <span className="text-rose-500">*</span>
                 </label>
 
-                {/* 3 Tipe Jadwal Buttons */}
-                <div className="grid grid-cols-3 gap-1.5 mb-2.5">
-                  {[
-                    { id: 'sepanjang_tahun', label: 'Sepanjang Tahun' },
-                    { id: 'multi_bulan', label: 'Multi Bulan' },
-                    { id: 'satu_kali', label: 'Satu Kali' },
-                  ].map((tj) => {
-                    const isSelected = formData.tipeJadwal === tj.id;
-                    return (
-                      <button
-                        key={tj.id}
-                        type="button"
-                        onClick={() => handleTipeJadwalChange(tj.id as ScheduleType)}
-                        className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition-all ${
-                          isSelected
-                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        {tj.label}
-                      </button>
-                    );
-                  })}
+                {/* Dragdown Pilihan Pola Jadwal Pelaksanaan */}
+                <div className="mb-2.5">
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    Pilihan Pola Pelaksanaan:
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={formData.tipeJadwal || 'sepanjang_tahun'}
+                      onChange={(e) => handleTipeJadwalChange(e.target.value as ScheduleType)}
+                      className="w-full h-9 bg-slate-50 border border-slate-300 rounded-xl px-3 pr-8 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs"
+                    >
+                      <option value="sepanjang_tahun">Sepanjang Tahun (Rutin 12 Bulan Penuh)</option>
+                      <option value="multi_bulan">Multi Bulan Terjadwal (Beberapa Bulan Tertentu)</option>
+                      <option value="satu_kali">Satu Kali Pelaksanaan (1 Bulan Tertentu)</option>
+                    </select>
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
+                  </div>
                 </div>
 
                 {/* Sub-UI: Sepanjang Tahun */}
@@ -941,25 +888,50 @@ export default function App() {
                         </button>
                       </div>
 
-                      {/* 12 Bulan Input Fields */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1">
+                      {/* 12 Bulan Calendar Date Pickers */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[340px] overflow-y-auto pr-1">
                         {BULAN_LIST.map((b) => {
-                          const val = formData.jadwalBulanan?.[b.no] || '';
+                          const isoVal = toISODateString(formData.jadwalBulanan?.[b.no]);
+                          const lastDay = new Date(formData.tahun || 2026, b.no, 0).getDate();
+                          const minDate = `${formData.tahun || 2026}-${String(b.no).padStart(2, '0')}-01`;
+                          const maxDate = `${formData.tahun || 2026}-${String(b.no).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+                          const formattedLabel = formatIndonesianDate(isoVal, true);
+
                           return (
                             <div
                               key={b.no}
-                              className="flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200"
+                              className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs hover:border-slate-300 transition-colors"
                             >
-                              <span className="w-16 text-[11px] font-bold text-slate-700 shrink-0">
-                                {b.nama}:
-                              </span>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
+                                  <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>{b.nama} {formData.tahun}</span>
+                                </span>
+                                {isoVal ? (
+                                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                    Sudah Dipilih
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] text-slate-400 font-medium">
+                                    Pilih Tanggal
+                                  </span>
+                                )}
+                              </div>
+
                               <input
-                                type="text"
-                                value={val}
+                                type="date"
+                                min={minDate}
+                                max={maxDate}
+                                value={isoVal}
                                 onChange={(e) => handleJadwalBulananChange(b.no, e.target.value)}
-                                placeholder={`Rencana tgl ${b.singkatan} ${formData.tahun}`}
-                                className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-slate-900 font-semibold focus:outline-none focus:border-slate-400 focus:bg-white"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 font-bold focus:outline-none focus:border-slate-400 focus:bg-white cursor-pointer"
                               />
+
+                              {isoVal && (
+                                <p className="text-[10px] text-emerald-800 font-semibold mt-1 truncate">
+                                  🗓 {formattedLabel}
+                                </p>
+                              )}
                             </div>
                           );
                         })}
@@ -1040,31 +1012,54 @@ export default function App() {
                       })}
                     </div>
 
-                    {/* Input Tanggal untuk Bulan Terpilih */}
+                    {/* Input Tanggal Kalender untuk Bulan Terpilih */}
                     {formData.bulanPelaksanaan && formData.bulanPelaksanaan.length > 0 && (
-                      <div className="pt-2 border-t border-slate-200 space-y-1.5">
+                      <div className="pt-2 border-t border-slate-200 space-y-2">
                         <label className="block text-[11px] font-bold text-slate-700">
-                          Tanggal Rencana Pelaksanaan Bulan Terpilih:
+                          Pilih Tanggal Rencana Pelaksanaan Bulan Terpilih (Kalender):
                         </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[220px] overflow-y-auto">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[260px] overflow-y-auto pr-1">
                           {formData.bulanPelaksanaan.map((mNo) => {
                             const bObj = BULAN_LIST[mNo - 1];
-                            const val = formData.jadwalBulanan?.[mNo] || '';
+                            const isoVal = toISODateString(formData.jadwalBulanan?.[mNo]);
+                            const lastDay = new Date(formData.tahun || 2026, mNo, 0).getDate();
+                            const minDate = `${formData.tahun || 2026}-${String(mNo).padStart(2, '0')}-01`;
+                            const maxDate = `${formData.tahun || 2026}-${String(mNo).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+                            const formattedLabel = formatIndonesianDate(isoVal, true);
+
                             return (
                               <div
                                 key={mNo}
-                                className="flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-slate-200"
+                                className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs hover:border-slate-300 transition-colors"
                               >
-                                <span className="w-16 text-[11px] font-bold text-slate-700 shrink-0">
-                                  {bObj?.nama}:
-                                </span>
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
+                                    <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span>{bObj?.nama} {formData.tahun}</span>
+                                  </span>
+                                  {isoVal ? (
+                                    <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                      Terpilih
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] text-slate-400 font-medium">
+                                      Pilih Tanggal
+                                    </span>
+                                  )}
+                                </div>
                                 <input
-                                  type="text"
-                                  value={val}
+                                  type="date"
+                                  min={minDate}
+                                  max={maxDate}
+                                  value={isoVal}
                                   onChange={(e) => handleJadwalBulananChange(mNo, e.target.value)}
-                                  placeholder={`Rencana tgl ${bObj?.singkatan} ${formData.tahun}`}
-                                  className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-slate-900 font-semibold focus:outline-none focus:border-slate-400 focus:bg-white"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 font-bold focus:outline-none focus:border-slate-400 focus:bg-white cursor-pointer"
                                 />
+                                {isoVal && (
+                                  <p className="text-[10px] text-emerald-800 font-semibold mt-1 truncate">
+                                    🗓 {formattedLabel}
+                                  </p>
+                                )}
                               </div>
                             );
                           })}
@@ -1076,168 +1071,46 @@ export default function App() {
 
                 {/* Sub-UI: Satu Kali Pelaksanaan */}
                 {formData.tipeJadwal === 'satu_kali' && (
-                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Bulan Pelaksanaan Kegiatan:
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                    <label className="block text-[11px] font-bold text-slate-800">
+                      Pilih Tanggal Pelaksanaan dari Kalender:
                     </label>
-                    <select
-                      value={formData.bulanPelaksanaan?.[0] || 1}
-                      onChange={(e) => {
-                        setFormData((prev) => ({
-                          ...prev,
-                          bulanPelaksanaan: [parseInt(e.target.value, 10)],
-                        }));
-                        setHasUnsavedChanges(true);
-                      }}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800"
-                    >
-                      {BULAN_LIST.map((m) => (
-                        <option key={m.no} value={m.no}>
-                          Bulan {m.nama}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Sub-UI: Kepastian Tanggal Pelaksanaan */}
-                <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-800">
-                      Kepastian Tanggal Pelaksanaan:
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-medium">
-                      Pilih kepastian tanggal
-                    </span>
-                  </div>
-
-                  {/* 3 Opsi: Tanggal Tertentu / Akan Ditentukan Kemudian / Rutin Berkala */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
-                    {[
-                      {
-                        id: 'tanggal_pasti',
-                        title: 'Tanggal Tertentu',
-                        desc: 'Sudah ada tanggal tertentu',
-                      },
-                      {
-                        id: 'akan_ditentukan',
-                        title: 'Ditentukan Kemudian',
-                        desc: 'Jadwal tanggal tentatif / TBD',
-                      },
-                      {
-                        id: 'rutin_berkala',
-                        title: 'Rutin Berkala',
-                        desc: 'Hari tertentu (misal: Selasa ke-1)',
-                      },
-                    ].map((opt) => {
-                      const isSelected = (formData.modeTanggal || 'rutin_berkala') === opt.id;
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => {
-                            let newTgl = formData.tanggalSpesifik || '';
-                            if (opt.id === 'akan_ditentukan') {
-                              newTgl = 'Tanggal akan ditentukan kemudian (Tentatif)';
-                            } else if (opt.id === 'rutin_berkala' && (!newTgl || newTgl.includes('kemudian'))) {
-                              newTgl = 'Setiap Selasa pertama tiap bulan';
-                            } else if (opt.id === 'tanggal_pasti' && (!newTgl || newTgl.includes('kemudian') || newTgl.includes('Selasa'))) {
-                              newTgl = '';
+                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <input
+                          type="date"
+                          min={`${formData.tahun || 2026}-01-01`}
+                          max={`${formData.tahun || 2026}-12-31`}
+                          value={toISODateString(formData.tanggalSpesifik)}
+                          onChange={(e) => {
+                            const picked = e.target.value;
+                            if (picked) {
+                              const mo = parseInt(picked.split('-')[1], 10);
+                              setFormData((prev) => ({
+                                ...prev,
+                                tanggalSpesifik: picked,
+                                bulanPelaksanaan: [mo],
+                              }));
+                            } else {
+                              setFormData((prev) => ({
+                                ...prev,
+                                tanggalSpesifik: '',
+                              }));
                             }
-                            setFormData((prev) => ({
-                              ...prev,
-                              modeTanggal: opt.id as any,
-                              tanggalSpesifik: newTgl,
-                            }));
                             setHasUnsavedChanges(true);
                           }}
-                          className={`text-left p-2 rounded-lg border transition-all ${
-                            isSelected
-                              ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                          }`}
-                        >
-                          <p className="text-xs font-bold leading-tight">{opt.title}</p>
-                          <p className={`text-[9px] mt-0.5 ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
-                            {opt.desc}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Input detail sesuai opsi tanggal terpilih */}
-                  {formData.modeTanggal === 'akan_ditentukan' ? (
-                    <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
-                      <span className="text-sm mt-0.5">⏳</span>
-                      <div>
-                        <p className="font-bold">Tanggal akan ditentukan kemudian (Tentatif)</p>
-                        <p className="text-[11px] text-amber-700 mt-0.5">
-                          Bulan kegiatan telah direncanakan, tanggal pasti pelaksanaan akan ditetapkan kemudian setelah koordinasi pengurus.
+                          className="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 font-bold focus:outline-none focus:border-slate-500 cursor-pointer"
+                        />
+                      </div>
+                      {formData.tanggalSpesifik && (
+                        <p className="text-xs text-emerald-800 font-bold bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+                          🗓 {formatIndonesianDate(formData.tanggalSpesifik, true)}
                         </p>
-                      </div>
+                      )}
                     </div>
-                  ) : formData.modeTanggal === 'rutin_berkala' ? (
-                    <div className="space-y-1.5 pt-1">
-                      <label className="block text-[11px] font-bold text-slate-700">
-                        Pola Pelaksanaan Rutin:
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.tanggalSpesifik || ''}
-                        onChange={(e) => {
-                          setFormData((prev) => ({ ...prev, tanggalSpesifik: e.target.value }));
-                          setHasUnsavedChanges(true);
-                        }}
-                        placeholder="Contoh: Setiap Selasa pertama tiap bulan"
-                        className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-slate-400"
-                      />
-                      {/* Quick Chips */}
-                      <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                        <span className="text-[10px] text-slate-400 font-medium">Pilihan cepat:</span>
-                        {[
-                          'Setiap Selasa pertama tiap bulan',
-                          'Setiap Minggu pertama tiap bulan',
-                          'Setiap hari Sabtu ke-2',
-                          'Hari Jumat terakhir tiap bulan',
-                        ].map((chip) => (
-                          <button
-                            key={chip}
-                            type="button"
-                            onClick={() => {
-                              setFormData((prev) => ({ ...prev, tanggalSpesifik: chip }));
-                              setHasUnsavedChanges(true);
-                            }}
-                            className={`px-2 py-0.5 text-[10px] font-semibold rounded-md border transition-colors ${
-                              formData.tanggalSpesifik === chip
-                                ? 'bg-emerald-600 text-white border-emerald-600'
-                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                            }`}
-                          >
-                            {chip}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    /* Tanggal Tertentu */
-                    <div className="space-y-1.5 pt-1">
-                      <label className="block text-[11px] font-bold text-slate-700">
-                        Tanggal Tertentu yang Ditentukan:
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.tanggalSpesifik || ''}
-                        onChange={(e) => {
-                          setFormData((prev) => ({ ...prev, tanggalSpesifik: e.target.value }));
-                          setHasUnsavedChanges(true);
-                        }}
-                        placeholder="Contoh: 15 Maret 2025 / Tanggal 1 s/d 3 / Pekan ke-2"
-                        className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-slate-400"
-                      />
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
               {/* FIELD 6: PENANGGUNG JAWAB (PIC) */}

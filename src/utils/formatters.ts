@@ -55,30 +55,79 @@ export function parseRupiahInput(val: string): number {
   return cleaned ? parseInt(cleaned, 10) : 0;
 }
 
+export function toISODateString(val?: string): string {
+  if (!val) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+
+  const regex = /(\d{1,2})\s+([a-zA-Z]+)\s+(\d{4})/;
+  const match = val.match(regex);
+  if (match) {
+    const day = parseInt(match[1], 10);
+    const monthName = match[2].toLowerCase();
+    const year = parseInt(match[3], 10);
+    const monthIdx = BULAN_LIST.findIndex(
+      (b) => b.nama.toLowerCase() === monthName || b.singkatan.toLowerCase() === monthName
+    );
+    if (monthIdx !== -1) {
+      const mStr = String(monthIdx + 1).padStart(2, '0');
+      const dStr = String(day).padStart(2, '0');
+      return `${year}-${mStr}-${dStr}`;
+    }
+  }
+
+  const d = new Date(val);
+  if (!isNaN(d.getTime())) {
+    return d.toISOString().slice(0, 10);
+  }
+  return '';
+}
+
+export function formatIndonesianDate(dateStr?: string, withDayName = true): string {
+  if (!dateStr) return '';
+  const iso = toISODateString(dateStr);
+  if (iso && iso.includes('-')) {
+    const parts = iso.split('-');
+    if (parts.length === 3) {
+      const yr = parseInt(parts[0], 10);
+      const mo = parseInt(parts[1], 10);
+      const da = parseInt(parts[2], 10);
+      if (!isNaN(yr) && !isNaN(mo) && !isNaN(da)) {
+        const dateObj = new Date(yr, mo - 1, da);
+        const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+        const dayName = dayNames[dateObj.getDay()];
+        const moName = BULAN_LIST[mo - 1]?.nama || '';
+        return withDayName && dayName ? `${dayName}, ${da} ${moName} ${yr}` : `${da} ${moName} ${yr}`;
+      }
+    }
+  }
+  return dateStr;
+}
+
 export function generateJadwalBulanan(
   tahun: number,
   pola: 'selasa_pertama' | 'minggu_pertama' | 'tanggal_1' | 'tanggal_5' | 'tanggal_10' | 'tanggal_15'
 ): Record<number, string> {
   const result: Record<number, string> = {};
   for (let m = 1; m <= 12; m++) {
-    const namaBulan = BULAN_LIST[m - 1]?.nama || '';
+    const mStr = String(m).padStart(2, '0');
+    let tgl = 1;
     if (pola === 'selasa_pertama') {
       const firstDay = new Date(tahun, m - 1, 1).getDay();
-      const tgl = ((2 - firstDay + 7) % 7) + 1;
-      result[m] = `${tgl} ${namaBulan} ${tahun}`;
+      tgl = ((2 - firstDay + 7) % 7) + 1;
     } else if (pola === 'minggu_pertama') {
       const firstDay = new Date(tahun, m - 1, 1).getDay();
-      const tgl = ((0 - firstDay + 7) % 7) + 1;
-      result[m] = `${tgl} ${namaBulan} ${tahun}`;
+      tgl = ((0 - firstDay + 7) % 7) + 1;
     } else if (pola === 'tanggal_1') {
-      result[m] = `1 ${namaBulan} ${tahun}`;
+      tgl = 1;
     } else if (pola === 'tanggal_5') {
-      result[m] = `5 ${namaBulan} ${tahun}`;
+      tgl = 5;
     } else if (pola === 'tanggal_10') {
-      result[m] = `10 ${namaBulan} ${tahun}`;
+      tgl = 10;
     } else if (pola === 'tanggal_15') {
-      result[m] = `15 ${namaBulan} ${tahun}`;
+      tgl = 15;
     }
+    const dStr = String(tgl).padStart(2, '0');
+    result[m] = `${tahun}-${mStr}-${dStr}`;
   }
   return result;
 }
@@ -170,7 +219,7 @@ export function exportToCSV(data: ProgramKerja[]) {
     item.estimasiAnggaran,
     getTipeJadwalLabel(item.tipeJadwal),
     `"${formatBulanPelaksanaan(item.bulanPelaksanaan)}"`,
-    `"${(item.tanggalSpesifik || '').replace(/"/g, '""')}"`,
+    `"${(item.tanggalSpesifik ? formatIndonesianDate(item.tanggalSpesifik) : '').replace(/"/g, '""')}"`,
     `"${(item.penanggungjawab?.nama || '').replace(/"/g, '""')}"`,
     `"${(item.penanggungjawab?.divisi || '').replace(/"/g, '""')}"`,
     `"${(item.penanggungjawab?.kontak || '').replace(/"/g, '""')}"`,
@@ -184,7 +233,7 @@ export function exportToCSV(data: ProgramKerja[]) {
   const encodedUri = encodeURI(csvContent);
   const link = document.createElement('a');
   link.setAttribute('href', encodedUri);
-  link.setAttribute('download', `Program_Kerja_2025_2026_${new Date().toISOString().slice(0, 10)}.csv`);
+  link.setAttribute('download', `Proker_Paroki_Katedral_Medan_${new Date().toISOString().slice(0, 10)}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

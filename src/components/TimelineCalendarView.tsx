@@ -152,7 +152,7 @@ export const TimelineCalendarView: React.FC<TimelineCalendarViewProps> = ({
                       <div className="flex items-center gap-1.5 mb-1">
                         <span
                           className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
-                            proker.tahun === 2025
+                            proker.tahun === 2026
                               ? 'bg-blue-50 text-blue-700'
                               : 'bg-purple-50 text-purple-700'
                           }`}

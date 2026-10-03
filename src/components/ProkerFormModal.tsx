@@ -23,7 +23,7 @@ interface ProkerFormModalProps {
   onClose: () => void;
   onSave: (program: Omit<ProgramKerja, 'id' | 'createdAt' | 'updatedAt'>, editId?: string) => void;
   editingProgram: ProgramKerja | null;
-  defaultYear?: 2025 | 2026;
+  defaultYear?: 2026 | 2027;
 }
 
 export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
@@ -31,10 +31,10 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
   onClose,
   onSave,
   editingProgram,
-  defaultYear = 2025,
+  defaultYear = 2026,
 }) => {
   // Form State
-  const [tahun, setTahun] = useState<2025 | 2026>(defaultYear);
+  const [tahun, setTahun] = useState<2026 | 2027>(defaultYear);
   const [namaProgram, setNamaProgram] = useState('');
   const [tujuanKegiatan, setTujuanKegiatan] = useState('');
   const [targetSasaran, setTargetSasaran] = useState('');
@@ -197,7 +197,7 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
               {editingProgram ? 'Ubah Program Kerja' : 'Isi Program Kerja Baru'}
             </h2>
             <p className="text-xs text-slate-500">
-              Rencana operasional & anggaran tahun 2025 / 2026
+              Rencana operasional & anggaran tahun 2026 / 2027
             </p>
           </div>
           <button
@@ -211,7 +211,7 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
 
         {/* Modal Scrollable Body */}
         <form onSubmit={handleSubmit} className="overflow-y-auto px-5 py-4 space-y-4.5 flex-1">
-          {/* 1. TAHUN PROGRAM (2025 vs 2026) */}
+          {/* 1. TAHUN PROGRAM (2026 vs 2027) */}
           <div>
             <label className="block text-xs font-bold text-slate-800 mb-1.5">
               Tahun Pelaksanaan <span className="text-rose-500">*</span>
@@ -219,28 +219,28 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setTahun(2025)}
-                className={`py-2.5 text-xs font-bold rounded-xl border flex items-center justify-center gap-2 transition-all ${
-                  tahun === 2025
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                <span>Tahun 2025</span>
-                {tahun === 2025 && <Check className="w-3.5 h-3.5" />}
-              </button>
-
-              <button
-                type="button"
                 onClick={() => setTahun(2026)}
                 className={`py-2.5 text-xs font-bold rounded-xl border flex items-center justify-center gap-2 transition-all ${
                   tahun === 2026
-                    ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                     : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                 }`}
               >
                 <span>Tahun 2026</span>
                 {tahun === 2026 && <Check className="w-3.5 h-3.5" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTahun(2027)}
+                className={`py-2.5 text-xs font-bold rounded-xl border flex items-center justify-center gap-2 transition-all ${
+                  tahun === 2027
+                    ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span>Tahun 2027</span>
+                {tahun === 2027 && <Check className="w-3.5 h-3.5" />}
               </button>
             </div>
           </div>

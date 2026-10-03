@@ -47,7 +47,7 @@ export const ProgramCard: React.FC<ProgramCardProps> = ({
         <div className="flex items-center gap-1.5">
           <span
             className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
-              program.tahun === 2025
+              program.tahun === 2026
                 ? 'bg-blue-50 text-blue-700 border border-blue-200'
                 : 'bg-purple-50 text-purple-700 border border-purple-200'
             }`}

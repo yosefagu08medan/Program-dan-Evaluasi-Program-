@@ -12,7 +12,7 @@ export interface PenanggungJawab {
 
 export interface ProgramKerja {
   id: string;
-  tahun: 2025 | 2026;
+  tahun: 2026 | 2027;
   namaProgram: string;
   tujuanKegiatan: string;
   targetSasaran: string;
@@ -20,7 +20,7 @@ export interface ProgramKerja {
   tipeJadwal: ScheduleType;
   bulanPelaksanaan: number[]; // 1 = Januari, ..., 12 = Desember
   modeTanggal?: ModeTanggal; // 'tanggal_pasti' | 'akan_ditentukan' | 'rutin_berkala'
-  tanggalSpesifik?: string; // e.g. "Setiap Selasa pertama tiap bulan", "15 Agustus 2025", or "Akan ditentukan kemudian"
+  tanggalSpesifik?: string; // e.g. "Setiap Selasa pertama tiap bulan", "15 Agustus 2026", or "Akan ditentukan kemudian"
   jadwalBulanan?: Record<number, string>; // Rencana tanggal pelaksanaan untuk tiap bulan (1-12)
   penanggungjawab: PenanggungJawab;
   status: ProgramStatus;
@@ -30,7 +30,7 @@ export interface ProgramKerja {
 }
 
 export interface FilterOptions {
-  tahun: 'all' | 2025 | 2026;
+  tahun: 'all' | 2026 | 2027;
   searchQuery: string;
   tipeJadwal: 'all' | ScheduleType;
   status: 'all' | ProgramStatus;

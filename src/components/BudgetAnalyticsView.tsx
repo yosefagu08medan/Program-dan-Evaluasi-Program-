@@ -18,12 +18,12 @@ interface BudgetAnalyticsViewProps {
 
 export const BudgetAnalyticsView: React.FC<BudgetAnalyticsViewProps> = ({ programs }) => {
   // Calculations
-  const programs2025 = programs.filter((p) => p.tahun === 2025);
   const programs2026 = programs.filter((p) => p.tahun === 2026);
+  const programs2027 = programs.filter((p) => p.tahun === 2027);
 
-  const totalAnggaran2025 = programs2025.reduce((sum, p) => sum + (p.estimasiAnggaran || 0), 0);
   const totalAnggaran2026 = programs2026.reduce((sum, p) => sum + (p.estimasiAnggaran || 0), 0);
-  const grandTotal = totalAnggaran2025 + totalAnggaran2026;
+  const totalAnggaran2027 = programs2027.reduce((sum, p) => sum + (p.estimasiAnggaran || 0), 0);
+  const grandTotal = totalAnggaran2026 + totalAnggaran2027;
 
   // Breakdown by Schedule Type
   const sepanjangTahunCount = programs.filter((p) => p.tipeJadwal === 'sepanjang_tahun').length;
@@ -58,37 +58,11 @@ export const BudgetAnalyticsView: React.FC<BudgetAnalyticsViewProps> = ({ progra
     <div className="space-y-4">
       {/* 2-Year Budget Comparison Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {/* Tahun 2025 */}
+        {/* Tahun 2026 */}
         <div className="bg-white rounded-2xl p-4 border border-blue-100 shadow-xs relative overflow-hidden">
           <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50/70 rounded-full blur-xl -mr-6 -mt-6 pointer-events-none" />
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
-              Tahun 2025
-            </span>
-            <span className="text-[11px] text-slate-500 font-semibold">
-              {programs2025.length} program
-            </span>
-          </div>
-          <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
-            Total Estimasi Anggaran
-          </p>
-          <p className="text-xl font-bold text-slate-900 tabular-nums mt-0.5">
-            {formatRupiah(totalAnggaran2025)}
-          </p>
-          <p className="text-[11px] text-slate-500 mt-2">
-            Rata-rata:{' '}
-            <span className="font-semibold text-slate-700 tabular-nums">
-              {formatCompactRupiah(programs2025.length ? Math.round(totalAnggaran2025 / programs2025.length) : 0)}
-            </span>{' '}
-            / kegiatan
-          </p>
-        </div>
-
-        {/* Tahun 2026 */}
-        <div className="bg-white rounded-2xl p-4 border border-purple-100 shadow-xs relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-purple-50/70 rounded-full blur-xl -mr-6 -mt-6 pointer-events-none" />
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
               Tahun 2026
             </span>
             <span className="text-[11px] text-slate-500 font-semibold">
@@ -109,13 +83,39 @@ export const BudgetAnalyticsView: React.FC<BudgetAnalyticsViewProps> = ({ progra
             / kegiatan
           </p>
         </div>
+
+        {/* Tahun 2027 */}
+        <div className="bg-white rounded-2xl p-4 border border-purple-100 shadow-xs relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-purple-50/70 rounded-full blur-xl -mr-6 -mt-6 pointer-events-none" />
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
+              Tahun 2027
+            </span>
+            <span className="text-[11px] text-slate-500 font-semibold">
+              {programs2027.length} program
+            </span>
+          </div>
+          <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+            Total Estimasi Anggaran
+          </p>
+          <p className="text-xl font-bold text-slate-900 tabular-nums mt-0.5">
+            {formatRupiah(totalAnggaran2027)}
+          </p>
+          <p className="text-[11px] text-slate-500 mt-2">
+            Rata-rata:{' '}
+            <span className="font-semibold text-slate-700 tabular-nums">
+              {formatCompactRupiah(programs2027.length ? Math.round(totalAnggaran2027 / programs2027.length) : 0)}
+            </span>{' '}
+            / kegiatan
+          </p>
+        </div>
       </div>
 
       {/* Combined Grand Total Banner */}
       <div className="bg-slate-900 text-white rounded-2xl p-4 shadow-sm flex items-center justify-between">
         <div>
           <p className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-            Akumulasi Anggaran 2 Tahun (2025 - 2026)
+            Akumulasi Anggaran 2 Tahun (2026 - 2027)
           </p>
           <p className="text-2xl font-bold tabular-nums text-white mt-0.5">
             {formatRupiah(grandTotal)}
