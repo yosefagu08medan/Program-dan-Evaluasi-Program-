@@ -17,6 +17,7 @@ import {
   formatRupiah,
   parseRupiahInput,
 } from '../utils/formatters';
+import { getDefaultPicForDivisi } from '../../database/master-data/divisions';
 
 interface ProkerFormModalProps {
   isOpen: boolean;
@@ -516,9 +517,14 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
 
           {/* 7. PENANGGUNG JAWAB */}
           <div className="pt-2 border-t border-slate-100 space-y-3">
-            <label className="block text-xs font-bold text-slate-800">
-              Penanggung Jawab (PIC) <span className="text-rose-500">*</span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-800">
+                Penanggung Jawab (PIC) <span className="text-rose-500">*</span>
+              </label>
+              <span className="text-[10px] text-slate-400">
+                Otomatis: Koordinator Seksi
+              </span>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
@@ -529,7 +535,7 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
                     setPjNama(e.target.value);
                     if (errors.pjNama) setErrors((prev) => ({ ...prev, pjNama: '' }));
                   }}
-                  placeholder="Nama Penanggung Jawab"
+                  placeholder="Nama Penanggung Jawab (contoh: Koordinator Seksi Liturgi)"
                   className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none ${
                     errors.pjNama ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200 focus:border-slate-400'
                   }`}
@@ -537,12 +543,36 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
                 {errors.pjNama && (
                   <p className="mt-1 text-[11px] font-medium text-rose-500">{errors.pjNama}</p>
                 )}
+
+                {/* Quick set default coordinator title */}
+                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                  <span className="text-[10px] text-slate-500 font-medium">Gelar Standar:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const auto = getDefaultPicForDivisi(pjDivisi);
+                      setPjNama(auto);
+                      if (errors.pjNama) setErrors((prev) => ({ ...prev, pjNama: '' }));
+                    }}
+                    className="text-[10px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-md transition-colors"
+                  >
+                    ⚡ Set: {getDefaultPicForDivisi(pjDivisi)}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <select
                   value={pjDivisi}
-                  onChange={(e) => setPjDivisi(e.target.value)}
+                  onChange={(e) => {
+                    const newDiv = e.target.value;
+                    const prevDefault = getDefaultPicForDivisi(pjDivisi);
+                    const shouldAuto = !pjNama.trim() || pjNama === prevDefault || pjNama.startsWith('Koordinator');
+                    setPjDivisi(newDiv);
+                    if (shouldAuto) {
+                      setPjNama(getDefaultPicForDivisi(newDiv));
+                    }
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
                 >
                   {DAFTAR_DIVISI.map((div) => (
@@ -551,6 +581,9 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
                     </option>
                   ))}
                 </select>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  15 Seksi resmi + DPPH
+                </p>
               </div>
             </div>
 

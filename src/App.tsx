@@ -42,6 +42,8 @@ import {
   toISODateString,
 } from './utils/formatters';
 import dbService from '../database';
+import { getDefaultPicForDivisi } from '../database/master-data/divisions';
+import { SelectSeksiModal } from './components/SelectSeksiModal';
 
 export default function App() {
   // 1. Data Store from DatabaseService with automatic migration execution and Cloud Firestore sync
@@ -65,9 +67,11 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Filters (Tahun & Bulan Kegiatan)
+  // 2. Filters (Tahun, Bulan, & Seksi)
   const [selectedYear, setSelectedYear] = useState<'all' | 2026 | 2027>('all');
   const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all'); // Filter berdasarkan bulan kegiatan
+  const [selectedSeksi, setSelectedSeksi] = useState<string | 'all'>('all'); // Filter berdasarkan Seksi/Divisi
+  const [isSelectSeksiModalOpen, setIsSelectSeksiModalOpen] = useState<boolean>(false);
   const [isMobileDeviceFrame, setIsMobileDeviceFrame] = useState<boolean>(false);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
 
@@ -78,7 +82,7 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 2500);
   };
 
-  // 3. Filtered programs list based on Tahun & Bulan
+  // 3. Filtered programs list based on Tahun, Bulan, & Seksi
   const filteredPrograms = useMemo(() => {
     return programs.filter((p) => {
       // Filter Tahun
@@ -87,9 +91,13 @@ export default function App() {
       if (selectedMonth !== 'all' && !p.bulanPelaksanaan?.includes(selectedMonth)) {
         return false;
       }
+      // Filter Seksi
+      if (selectedSeksi !== 'all' && p.penanggungjawab?.divisi !== selectedSeksi) {
+        return false;
+      }
       return true;
     });
-  }, [programs, selectedYear, selectedMonth]);
+  }, [programs, selectedYear, selectedMonth, selectedSeksi]);
 
   // 4. Currently Selected Program ID for 1-Screen View & Editing
   const [currentId, setCurrentId] = useState<string>(() => {
@@ -281,9 +289,47 @@ export default function App() {
     showToast('Data program kerja berhasil disimpan ke Cloud & Lokal!');
   };
 
+  // Create new program for specific selected Seksi
+  const handleCreateProgramForSeksi = (seksiName: string, defaultPicName: string) => {
+    const targetTahun = selectedYear === 'all' ? 2026 : selectedYear;
+    const initialBulan = selectedMonth === 'all' ? [1, 2, 3] : [selectedMonth as number];
+    const newId = `proker-${Date.now()}`;
+    const newProg: ProgramKerja = {
+      id: newId,
+      tahun: targetTahun,
+      namaProgram: `Program Kerja ${seksiName}`,
+      tujuanKegiatan: '',
+      targetSasaran: '',
+      estimasiAnggaran: 10000000,
+      tipeJadwal: selectedMonth === 'all' ? 'multi_bulan' : 'satu_kali',
+      bulanPelaksanaan: initialBulan,
+      modeTanggal: 'akan_ditentukan',
+      tanggalSpesifik: 'Tanggal akan ditentukan kemudian (Tentatif)',
+      penanggungjawab: {
+        nama: defaultPicName,
+        divisi: seksiName,
+        kontak: '',
+      },
+      status: 'direncanakan',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // If currently filtered by a different seksi, reset or align filter to new seksi
+    if (selectedSeksi !== 'all' && selectedSeksi !== seksiName) {
+      setSelectedSeksi('all');
+    }
+
+    dbService.saveProgram(newProg);
+    setCurrentId(newId);
+    showToast(`Program baru untuk ${seksiName} dibuat dengan PIC ${defaultPicName}!`);
+  };
+
   // Create new program in place
   const handleAddNew = () => {
     const targetTahun = selectedYear === 'all' ? 2026 : selectedYear;
+    const targetSeksi = selectedSeksi !== 'all' ? selectedSeksi : DAFTAR_DIVISI[0];
+    const defaultPic = getDefaultPicForDivisi(targetSeksi);
     const initialBulan = selectedMonth === 'all' ? [1, 2, 3] : [selectedMonth];
     const newId = `proker-${Date.now()}`;
     const newProg: ProgramKerja = {
@@ -298,8 +344,8 @@ export default function App() {
       modeTanggal: 'akan_ditentukan',
       tanggalSpesifik: 'Tanggal akan ditentukan kemudian (Tentatif)',
       penanggungjawab: {
-        nama: '',
-        divisi: DAFTAR_DIVISI[0],
+        nama: defaultPic,
+        divisi: targetSeksi,
         kontak: '',
       },
       status: 'direncanakan',
@@ -309,7 +355,7 @@ export default function App() {
 
     dbService.saveProgram(newProg);
     setCurrentId(newId);
-    showToast('Program baru dibuat. Silakan lengkapi datanya!');
+    showToast(`Program baru dibuat dengan PIC ${defaultPic}!`);
   };
 
   // Duplicate current program
@@ -444,11 +490,22 @@ export default function App() {
                 )}
               </button>
 
+              {/* Input Program per Seksi Button (New Dialog) */}
+              <button
+                type="button"
+                onClick={() => setIsSelectSeksiModalOpen(true)}
+                className="h-8 px-2.5 sm:px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-colors"
+                title="Pilih seksi untuk input program kerja baru"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Input Seksi</span>
+              </button>
+
               {/* Tambah Baru Button */}
               <button
                 type="button"
                 onClick={handleAddNew}
-                className="h-8 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-colors"
+                className="h-8 px-2.5 sm:px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-colors"
               >
                 <Plus className="w-3.5 h-3.5 text-emerald-400" />
                 <span>+ Baru</span>
@@ -456,12 +513,12 @@ export default function App() {
             </div>
           </div>
 
-          {/* FILTER DRAGDOWN: PILIHAN TAHUN & PILIHAN BULAN */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+          {/* FILTER DRAGDOWN: TAHUN, BULAN, & SEKSI */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
             {/* 1. Dragdown Pilihan Tahun Anggaran */}
             <div>
               <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                Pilihan Tahun Anggaran:
+                Tahun Anggaran:
               </label>
               <div className="relative">
                 <select
@@ -483,14 +540,14 @@ export default function App() {
             {/* 2. Dragdown Pilihan Bulan Kegiatan */}
             <div>
               <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                <span>Pilihan Bulan Kegiatan:</span>
+                <span>Bulan Kegiatan:</span>
                 {selectedMonth !== 'all' && (
                   <button
                     type="button"
                     onClick={() => setSelectedMonth('all')}
                     className="text-emerald-700 hover:underline normal-case font-bold"
                   >
-                    Reset Semua
+                    Reset
                   </button>
                 )}
               </div>
@@ -504,13 +561,51 @@ export default function App() {
                   className="w-full h-9 bg-white border border-slate-300 rounded-lg px-2.5 pr-7 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-500 cursor-pointer shadow-2xs"
                 >
                   <option value="all">
-                    Semua Bulan (Januari – Desember) · {programsInSelectedYear.length} Program
+                    Semua Bulan (12 Bln)
                   </option>
                   {monthCounts.map((m) => (
                     <option key={m.no} value={m.no}>
-                      Bulan {m.nama} · ({m.count} Program)
+                      {m.nama} ({m.count})
                     </option>
                   ))}
+                </select>
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
+              </div>
+            </div>
+
+            {/* 3. Dragdown Pilihan Seksi / Unit Kerja */}
+            <div>
+              <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                <span>Seksi / Unit Kerja:</span>
+                {selectedSeksi !== 'all' && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSeksi('all')}
+                    className="text-emerald-700 hover:underline normal-case font-bold"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+              <div className="relative">
+                <select
+                  value={selectedSeksi}
+                  onChange={(e) => setSelectedSeksi(e.target.value)}
+                  className="w-full h-9 bg-white border border-slate-300 rounded-lg px-2.5 pr-7 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                >
+                  <option value="all">Semua Seksi (16 Seksi)</option>
+                  {DAFTAR_DIVISI.map((div) => {
+                    const count = programs.filter(
+                      (p) =>
+                        p.penanggungjawab?.divisi === div &&
+                        (selectedYear === 'all' || p.tahun === selectedYear)
+                    ).length;
+                    return (
+                      <option key={div} value={div}>
+                        {div} {count > 0 ? `(${count})` : ''}
+                      </option>
+                    );
+                  })}
                 </select>
                 <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
               </div>
@@ -1084,9 +1179,14 @@ export default function App() {
 
               {/* FIELD 6: PENANGGUNG JAWAB (PIC) */}
               <div className="pt-2 border-t border-slate-100 space-y-2.5">
-                <label className="block text-xs font-bold text-slate-800">
-                  6. Penanggung Jawab (PIC) <span className="text-rose-500">*</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800">
+                    6. Penanggung Jawab (PIC) <span className="text-rose-500">*</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400">
+                    Otomatis: Koordinator Seksi
+                  </span>
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
@@ -1103,7 +1203,7 @@ export default function App() {
                         }));
                         setHasUnsavedChanges(true);
                       }}
-                      placeholder="Nama PIC (Contoh: Yosef dan Putut sebagai Sekretaris 1 dan Sekretaris 2)"
+                      placeholder="Nama PIC (contoh: Koordinator Seksi Keamanan)"
                       className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none ${
                         formErrors.pjNama ? 'border-rose-400' : 'border-slate-200 focus:border-slate-400'
                       }`}
@@ -1111,17 +1211,55 @@ export default function App() {
                     {formErrors.pjNama && (
                       <p className="mt-1 text-[11px] text-rose-500 font-medium">{formErrors.pjNama}</p>
                     )}
+
+                    {/* Quick Button: Set/Reset to official Koordinator title */}
+                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                      <span className="text-[10px] text-slate-500 font-medium">Gelar Standar:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const autoPic = getDefaultPicForDivisi(formData.penanggungjawab?.divisi || DAFTAR_DIVISI[0]);
+                          setFormData((prev) => ({
+                            ...prev,
+                            penanggungjawab: {
+                              ...(prev.penanggungjawab || { divisi: DAFTAR_DIVISI[0], kontak: '' }),
+                              nama: autoPic,
+                            },
+                          }));
+                          setHasUnsavedChanges(true);
+                          showToast(`Gelar PIC diatur: ${autoPic}`);
+                        }}
+                        className="text-[10px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-md transition-colors"
+                        title="Klik untuk memasang gelar Koordinator Seksi ini"
+                      >
+                        ⚡ Set: {getDefaultPicForDivisi(formData.penanggungjawab?.divisi || DAFTAR_DIVISI[0])}
+                      </button>
+                    </div>
                   </div>
 
                   <div>
                     <select
                       value={formData.penanggungjawab?.divisi || DAFTAR_DIVISI[0]}
                       onChange={(e) => {
+                        const newDiv = e.target.value;
+                        const prevDiv = formData.penanggungjawab?.divisi || DAFTAR_DIVISI[0];
+                        const prevDefaultPic = getDefaultPicForDivisi(prevDiv);
+                        const currentName = formData.penanggungjawab?.nama || '';
+
+                        // Update PIC name if empty or was previously a default coordinator title
+                        const shouldAutoUpdate =
+                          !currentName.trim() ||
+                          currentName === prevDefaultPic ||
+                          currentName.startsWith('Koordinator') ||
+                          currentName.startsWith('Sekretariat');
+                        const newPic = shouldAutoUpdate ? getDefaultPicForDivisi(newDiv) : currentName;
+
                         setFormData((prev) => ({
                           ...prev,
                           penanggungjawab: {
-                            ...(prev.penanggungjawab || { nama: '', kontak: '' }),
-                            divisi: e.target.value,
+                            ...(prev.penanggungjawab || { kontak: '' }),
+                            divisi: newDiv,
+                            nama: newPic,
                           },
                         }));
                         setHasUnsavedChanges(true);
@@ -1134,6 +1272,9 @@ export default function App() {
                         </option>
                       ))}
                     </select>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Pilihan dari 15 Seksi resmi + DPPH
+                    </p>
                   </div>
                 </div>
 
@@ -1270,6 +1411,15 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {/* Modal Pemilihan Seksi untuk Input Program Kerja Baru */}
+        <SelectSeksiModal
+          isOpen={isSelectSeksiModalOpen}
+          onClose={() => setIsSelectSeksiModalOpen(false)}
+          onSelectSeksi={handleCreateProgramForSeksi}
+          selectedYear={selectedYear === 'all' ? 2026 : selectedYear}
+          existingPrograms={programs}
+        />
       </div>
     </div>
   );
