@@ -1,4 +1,5 @@
 import { ProgramKerja, ScheduleType, ProgramStatus } from '../types/proker';
+import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
 
 export const BULAN_LIST = [
   { no: 1, nama: 'Januari', singkatan: 'Jan' },
@@ -15,17 +16,7 @@ export const BULAN_LIST = [
   { no: 12, nama: 'Desember', singkatan: 'Des' },
 ];
 
-export const DAFTAR_DIVISI = [
-  'Sekretariat / DPPH',
-  'Dewan Pengurus Harian (DPPH)',
-  'Bidang Liturgi & Peribadatan',
-  'Bidang Pewartaan & Katekese',
-  'Bidang Pelayanan & Sosial (PSE)',
-  'Bidang Paguyuban & Komunitas',
-  'Umum & Operasional',
-  'Keuangan & Anggaran',
-  'Pengembangan SDM & Kerumahtanggaan',
-];
+export const DAFTAR_DIVISI: string[] = MASTER_DIVISIONS.map((d) => d.nama);
 
 export function formatRupiah(amount: number): string {
   if (isNaN(amount) || amount === null || amount === undefined) return 'Rp 0';

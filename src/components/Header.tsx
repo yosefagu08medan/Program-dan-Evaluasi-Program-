@@ -33,9 +33,15 @@ export const Header: React.FC<HeaderProps> = ({
               <h1 className="text-base font-bold text-slate-900 leading-tight truncate">
                 Proker Mobile
               </h1>
-              <p className="text-xs text-slate-500 font-medium">
-                Rencana Kerja 2025 & 2026
-              </p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-xs text-slate-500 font-medium">
+                  Rencana Kerja 2026 & 2027
+                </p>
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded-full border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Cloud Synced
+                </span>
+              </div>
             </div>
           </div>
 

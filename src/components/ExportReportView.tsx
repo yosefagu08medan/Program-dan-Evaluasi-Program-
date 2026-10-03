@@ -10,6 +10,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { ProgramKerja } from '../types/proker';
+import dbService from '../../database';
 import {
   exportToCSV,
   formatRupiah,
@@ -31,9 +32,9 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Backup to JSON
+  // Backup to JSON with full database metadata
   const handleExportJSON = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(programs, null, 2));
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(dbService.exportBackup());
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
     downloadAnchor.setAttribute('download', `backup_proker_2026_2027_${new Date().toISOString().slice(0, 10)}.json`);
@@ -42,22 +43,19 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
     downloadAnchor.remove();
   };
 
-  // Restore from JSON
+  // Restore from JSON with safe schema validation
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileReader = new FileReader();
     if (e.target.files && e.target.files[0]) {
       fileReader.readAsText(e.target.files[0], 'UTF-8');
-      fileReader.onload = (event) => {
-        try {
-          const parsed = JSON.parse(event.target?.result as string);
-          if (Array.isArray(parsed)) {
-            onRestoreData(parsed);
-            alert(`Berhasil memulihkan ${parsed.length} program kerja!`);
-          } else {
-            alert('Format file JSON tidak valid!');
-          }
-        } catch (err) {
-          alert('Gagal membaca file JSON. Pastikan file valid.');
+      fileReader.onload = async (event) => {
+        const content = event.target?.result as string;
+        const res = await dbService.importBackup(content);
+        if (res.success) {
+          onRestoreData(dbService.getPrograms());
+          alert(res.message);
+        } else {
+          alert(res.message);
         }
       };
     }

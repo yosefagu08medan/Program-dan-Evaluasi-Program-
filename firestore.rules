@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Helper Primitives
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // 3. Schema & Entity Validator for ProgramKerja
+    function isValidProgramKerja(data) {
+      return data.keys().hasAll(['id', 'tahun', 'namaProgram', 'status'])
+        && data.id is string
+        && data.id.size() <= 128
+        && data.tahun is int
+        && (data.tahun == 2026 || data.tahun == 2027)
+        && data.namaProgram is string
+        && data.namaProgram.size() >= 1
+        && data.namaProgram.size() <= 300
+        && data.status in ['direncanakan', 'berjalan', 'selesai', 'ditunda']
+        && (!('estimasiAnggaran' in data) || (data.estimasiAnggaran is number && data.estimasiAnggaran >= 0))
+        && (!('tujuanKegiatan' in data) || (data.tujuanKegiatan is string && data.tujuanKegiatan.size() <= 2000))
+        && (!('targetSasaran' in data) || (data.targetSasaran is string && data.targetSasaran.size() <= 1000))
+        && (!('catatan' in data) || (data.catatan is string && data.catatan.size() <= 3000))
+        && (!('tanggalSpesifik' in data) || (data.tanggalSpesifik is string && data.tanggalSpesifik.size() <= 500))
+        && (!('bulanPelaksanaan' in data) || (data.bulanPelaksanaan is list && data.bulanPelaksanaan.size() <= 12));
+    }
+
+    // 4. Connection Test Endpoint
+    match /test/{testId} {
+      allow read: if true;
+    }
+
+    // 5. Programs Collection
+    match /programs/{programId} {
+      // Program kerja paroki dapat dibaca secara publik oleh umat dan pengurus
+      allow get, list: if true;
+
+      // Pembuatan program kerja
+      allow create: if isValidId(programId)
+        && isValidProgramKerja(incoming())
+        && incoming().id == programId;
+
+      // Pembaruan program kerja
+      allow update: if isValidId(programId)
+        && isValidProgramKerja(incoming())
+        && incoming().id == programId;
+
+      // Penghapusan program kerja
+      allow delete: if isValidId(programId);
+    }
+
+    // 6. System Metadata Collection
+    match /metadata/{metaId} {
+      allow get: if true;
+      allow write: if true;
+    }
+  }
+}

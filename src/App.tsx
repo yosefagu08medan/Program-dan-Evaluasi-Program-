@@ -41,55 +41,29 @@ import {
   formatIndonesianDate,
   toISODateString,
 } from './utils/formatters';
-
-const STORAGE_KEY = 'proker_katedral_medan_2026_2027_v12';
+import dbService from '../database';
 
 export default function App() {
-  // 1. Data Store
+  // 1. Data Store from DatabaseService with automatic migration execution and Cloud Firestore sync
   const [programs, setPrograms] = useState<ProgramKerja[]>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // If previous storage contained the old dummy data, clear it and use new DPPH data
-          const hasOldDummy = parsed.some(
-            (p) => p.id === 'proker-2025-01' || p.penanggungjawab?.nama?.includes('Budi Santoso')
-          );
-          if (!hasOldDummy) {
-            return parsed.map((p) =>
-              p.id === 'proker-dpph-01'
-                ? {
-                    ...p,
-                    tahun: p.tahun === 2025 ? 2026 : p.tahun,
-                    modeTanggal: 'rutin_berkala',
-                    tanggalSpesifik: 'Setiap Selasa pertama tiap bulan',
-                    jadwalBulanan:
-                      p.jadwalBulanan && Object.keys(p.jadwalBulanan).length > 0
-                        ? p.jadwalBulanan
-                        : generateJadwalBulanan(p.tahun || 2026, 'selasa_pertama'),
-                    catatan:
-                      'Dilaksanakan setiap hari Selasa pertama tiap bulan. PIC bertanggung jawab menyiapkan undangan, materi agenda rapat, konsumsi, dan notulensi.',
-                  }
-                : p
-            );
-          }
-        }
-      }
+      const initData = dbService.initDatabase();
+      return initData.programs;
     } catch (e) {
-      console.error('Error loading saved proker:', e);
+      console.error('Error initializing database service:', e);
+      return INITIAL_PROGRAM_KERJA;
     }
-    return INITIAL_PROGRAM_KERJA;
   });
 
-  // Save to localStorage
+  // Subscribe to real-time Cloud Firestore & local database changes
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(programs));
-    } catch (e) {
-      console.error('Error saving proker:', e);
-    }
-  }, [programs]);
+    const unsubscribe = dbService.subscribe((updated) => {
+      if (Array.isArray(updated) && updated.length > 0) {
+        setPrograms(updated);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // 2. Filters (Tahun & Bulan Kegiatan)
   const [selectedYear, setSelectedYear] = useState<'all' | 2026 | 2027>('all');
@@ -297,19 +271,14 @@ export default function App() {
     }
 
     const now = new Date().toISOString();
-    setPrograms((prev) =>
-      prev.map((p) =>
-        p.id === currentId
-          ? {
-              ...p,
-              ...(formData as ProgramKerja),
-              updatedAt: now,
-            }
-          : p
-      )
-    );
+    const updated: ProgramKerja = {
+      ...(formData as ProgramKerja),
+      id: currentId,
+      updatedAt: now,
+    };
+    dbService.saveProgram(updated);
     setHasUnsavedChanges(false);
-    showToast('Data program kerja berhasil disimpan!');
+    showToast('Data program kerja berhasil disimpan ke Cloud & Lokal!');
   };
 
   // Create new program in place
@@ -338,7 +307,7 @@ export default function App() {
       updatedAt: new Date().toISOString(),
     };
 
-    setPrograms((prev) => [newProg, ...prev]);
+    dbService.saveProgram(newProg);
     setCurrentId(newId);
     showToast('Program baru dibuat. Silakan lengkapi datanya!');
   };
@@ -354,7 +323,7 @@ export default function App() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    setPrograms((prev) => [duplicated, ...prev]);
+    dbService.saveProgram(duplicated);
     setCurrentId(newId);
     showToast('Program berhasil disalin!');
   };
@@ -367,8 +336,8 @@ export default function App() {
       return;
     }
     if (window.confirm(`Yakin ingin menghapus program: "${currentProgram.namaProgram}"?`)) {
+      dbService.deleteProgram(currentId);
       const remaining = programs.filter((p) => p.id !== currentId);
-      setPrograms(remaining);
       const nextActive = remaining[0]?.id || '';
       setCurrentId(nextActive);
       showToast('Program kerja berhasil dihapus.');

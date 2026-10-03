@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "ProgramKerja": {
+      "title": "ProgramKerja",
+      "description": "Dokumen rencana program kerja tahunan paroki",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identifier unik program kerja",
+          "maxLength": 128
+        },
+        "tahun": {
+          "type": "number",
+          "description": "Tahun anggaran program (2026 atau 2027)",
+          "enum": [2026, 2027]
+        },
+        "namaProgram": {
+          "type": "string",
+          "description": "Nama program kerja kegiatan",
+          "maxLength": 300,
+          "minLength": 1
+        },
+        "tujuanKegiatan": {
+          "type": "string",
+          "description": "Maksud dan tujuan kegiatan pastoral",
+          "maxLength": 2000
+        },
+        "targetSasaran": {
+          "type": "string",
+          "description": "Sasaran peserta atau umat yang dilayani",
+          "maxLength": 1000
+        },
+        "estimasiAnggaran": {
+          "type": "number",
+          "description": "Estimasi nominal biaya dalam Rupiah"
+        },
+        "tipeJadwal": {
+          "type": "string",
+          "description": "Pola jadwal pelaksanaan",
+          "enum": ["sepanjang_tahun", "multi_bulan", "satu_kali"]
+        },
+        "bulanPelaksanaan": {
+          "type": "array",
+          "description": "Daftar bulan pelaksanaan 1-12"
+        },
+        "modeTanggal": {
+          "type": "string",
+          "description": "Mode penetapan tanggal kegiatan",
+          "enum": ["tanggal_pasti", "akan_ditentukan", "rutin_berkala"]
+        },
+        "tanggalSpesifik": {
+          "type": "string",
+          "description": "Keterangan tanggal spesifik atau tanggal pasti",
+          "maxLength": 500
+        },
+        "jadwalBulanan": {
+          "type": "object",
+          "description": "Pemetaan bulan ke tanggal pelaksanaan"
+        },
+        "penanggungjawab": {
+          "type": "object",
+          "description": "Data penanggung jawab kegiatan"
+        },
+        "status": {
+          "type": "string",
+          "description": "Status eksekusi program kerja",
+          "enum": ["direncanakan", "berjalan", "selesai", "ditunda"]
+        },
+        "catatan": {
+          "type": "string",
+          "description": "Catatan teknis operasional",
+          "maxLength": 3000
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp waktu dibuat"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp waktu terakhir diperbarui"
+        }
+      },
+      "required": ["id", "tahun", "namaProgram", "status"]
+    }
+  },
+  "firestore": {
+    "/programs/{programId}": {
+      "schema": {
+        "$ref": "#/entities/ProgramKerja"
+      },
+      "description": "Koleksi dokumen program kerja Paroki Katedral Medan"
+    }
+  }
+}
