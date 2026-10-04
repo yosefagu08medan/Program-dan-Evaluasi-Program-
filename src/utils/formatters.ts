@@ -125,6 +125,8 @@ export function generateJadwalBulanan(
 
 export function getTipeJadwalLabel(type: ScheduleType): string {
   switch (type) {
+    case 'tentatif':
+      return 'Tentatif (Belum Ditentukan Waktunya)';
     case 'sepanjang_tahun':
       return 'Sepanjang Tahun';
     case 'multi_bulan':
@@ -134,6 +136,14 @@ export function getTipeJadwalLabel(type: ScheduleType): string {
     default:
       return type;
   }
+}
+
+export function isTentatifProgram(p: ProgramKerja): boolean {
+  if (p.tipeJadwal === 'tentatif') return true;
+  if (!p.bulanPelaksanaan || p.bulanPelaksanaan.length === 0) return true;
+  const tgl = (p.tanggalSpesifik || '').toLowerCase();
+  if (tgl.includes('tentatif') || tgl.includes('akan ditentukan')) return true;
+  return false;
 }
 
 export function getStatusInfo(status: ProgramStatus) {

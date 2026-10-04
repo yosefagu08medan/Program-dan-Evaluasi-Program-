@@ -26,6 +26,7 @@ import {
   Monitor,
   Check,
   RotateCcw,
+  LayoutDashboard,
 } from 'lucide-react';
 import { ProgramKerja, ScheduleType, ProgramStatus } from './types/proker';
 import { INITIAL_PROGRAM_KERJA } from './data/initialData';
@@ -40,10 +41,13 @@ import {
   generateJadwalBulanan,
   formatIndonesianDate,
   toISODateString,
+  isTentatifProgram,
 } from './utils/formatters';
 import dbService from '../database';
-import { getDefaultPicForDivisi } from '../database/master-data/divisions';
+import { getDefaultPicForDivisi, MASTER_DIVISIONS } from '../database/master-data/divisions';
 import { SelectSeksiModal } from './components/SelectSeksiModal';
+import { DashboardView } from './components/DashboardView';
+import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 
 export default function App() {
   // 1. Data Store from DatabaseService with automatic migration execution and Cloud Firestore sync
@@ -67,11 +71,13 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Filters (Tahun, Bulan, & Seksi)
+  // 2. Filters & Navigation Tabs
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'input'>('dashboard');
   const [selectedYear, setSelectedYear] = useState<'all' | 2026 | 2027>('all');
-  const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all'); // Filter berdasarkan bulan kegiatan
+  const [selectedMonth, setSelectedMonth] = useState<number | 'all' | 'tentatif'>('all'); // Default 'all' atau bulan tertentu
   const [selectedSeksi, setSelectedSeksi] = useState<string | 'all'>('all'); // Filter berdasarkan Seksi/Divisi
   const [isSelectSeksiModalOpen, setIsSelectSeksiModalOpen] = useState<boolean>(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState<boolean>(false);
   const [isMobileDeviceFrame, setIsMobileDeviceFrame] = useState<boolean>(false);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
 
@@ -82,14 +88,20 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 2500);
   };
 
-  // 3. Filtered programs list based on Tahun, Bulan, & Seksi
+  // 3. Filtered programs list based on Tahun, Bulan, & Seksi (mendukung opsi tentatif)
   const filteredPrograms = useMemo(() => {
     return programs.filter((p) => {
       // Filter Tahun
       if (selectedYear !== 'all' && p.tahun !== selectedYear) return false;
       // Filter Bulan Kegiatan
-      if (selectedMonth !== 'all' && !p.bulanPelaksanaan?.includes(selectedMonth)) {
-        return false;
+      if (selectedMonth !== 'all') {
+        if (selectedMonth === 'tentatif') {
+          if (!isTentatifProgram(p)) return false;
+        } else {
+          if (isTentatifProgram(p) || !p.bulanPelaksanaan?.includes(selectedMonth as number)) {
+            return false;
+          }
+        }
       }
       // Filter Seksi
       if (selectedSeksi !== 'all' && p.penanggungjawab?.divisi !== selectedSeksi) {
@@ -174,28 +186,41 @@ export default function App() {
     setHasUnsavedChanges(true);
   };
 
-  // Schedule Type Change
+  // Schedule Type Change (Mendukung tipe tentatif)
   const handleTipeJadwalChange = (tipe: ScheduleType) => {
     setFormData((prev) => {
       let bulan = prev.bulanPelaksanaan || [];
       let jadwalBln = prev.jadwalBulanan || {};
-      if (tipe === 'sepanjang_tahun') {
+      let modeTgl = prev.modeTanggal;
+      let tglSpesifik = prev.tanggalSpesifik;
+
+      if (tipe === 'tentatif') {
+        bulan = [];
+        jadwalBln = {};
+        modeTgl = 'akan_ditentukan';
+        tglSpesifik = prev.tanggalSpesifik || 'Tentatif (Waktu dan tanggal belum ditentukan)';
+      } else if (tipe === 'sepanjang_tahun') {
         bulan = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        modeTgl = 'rutin_berkala';
         if (!jadwalBln || Object.keys(jadwalBln).length === 0) {
           jadwalBln = generateJadwalBulanan(prev.tahun || 2026, 'selasa_pertama');
         }
       } else if (tipe === 'satu_kali') {
         bulan = bulan.length > 0 ? [bulan[0]] : [1];
+        modeTgl = 'tanggal_pasti';
       } else {
         if (bulan.length === 12 || bulan.length === 0) {
           bulan = [3, 6, 9];
         }
+        modeTgl = 'tanggal_pasti';
       }
       return {
         ...prev,
         tipeJadwal: tipe,
         bulanPelaksanaan: bulan,
         jadwalBulanan: jadwalBln,
+        modeTanggal: modeTgl,
+        tanggalSpesifik: tglSpesifik,
       };
     });
     setHasUnsavedChanges(true);
@@ -260,7 +285,7 @@ export default function App() {
     if (!formData.tujuanKegiatan?.trim()) errors.tujuanKegiatan = 'Tujuan kegiatan wajib diisi';
     if (!formData.targetSasaran?.trim()) errors.targetSasaran = 'Target sasaran wajib diisi';
     if (!formData.penanggungjawab?.nama?.trim()) errors.pjNama = 'Nama PJ wajib diisi';
-    if (!formData.bulanPelaksanaan || formData.bulanPelaksanaan.length === 0) {
+    if (formData.tipeJadwal !== 'tentatif' && (!formData.bulanPelaksanaan || formData.bulanPelaksanaan.length === 0)) {
       errors.bulanPelaksanaan = 'Pilih minimal 1 bulan pelaksanaan';
     }
     if (formData.tipeJadwal === 'sepanjang_tahun') {
@@ -322,6 +347,7 @@ export default function App() {
 
     dbService.saveProgram(newProg);
     setCurrentId(newId);
+    setActiveTab('input');
     showToast(`Program baru untuk ${seksiName} dibuat dengan PIC ${defaultPicName}!`);
   };
 
@@ -355,6 +381,7 @@ export default function App() {
 
     dbService.saveProgram(newProg);
     setCurrentId(newId);
+    setActiveTab('input');
     showToast(`Program baru dibuat dengan PIC ${defaultPic}!`);
   };
 
@@ -374,20 +401,28 @@ export default function App() {
     showToast('Program berhasil disalin!');
   };
 
-  // Delete current program
-  const handleDelete = () => {
+  // Delete current program - buka modal konfirmasi
+  const handleDeleteClick = () => {
+    if (!currentProgram) return;
+    setIsDeleteModalOpen(true);
+  };
+
+  // Eksekusi penghapusan setelah dikonfirmasi oleh pengguna di modal
+  const handleExecuteDelete = () => {
     if (!currentProgram) return;
     if (programs.length <= 1) {
-      alert('Minimal harus ada 1 program kerja dalam sistem.');
+      showToast('Minimal harus ada 1 program kerja dalam sistem.');
+      setIsDeleteModalOpen(false);
       return;
     }
-    if (window.confirm(`Yakin ingin menghapus program: "${currentProgram.namaProgram}"?`)) {
-      dbService.deleteProgram(currentId);
-      const remaining = programs.filter((p) => p.id !== currentId);
-      const nextActive = remaining[0]?.id || '';
-      setCurrentId(nextActive);
-      showToast('Program kerja berhasil dihapus.');
-    }
+
+    const progName = currentProgram.namaProgram;
+    dbService.deleteProgram(currentId);
+    const remaining = programs.filter((p) => p.id !== currentId);
+    const nextActive = remaining[0]?.id || '';
+    setCurrentId(nextActive);
+    setIsDeleteModalOpen(false);
+    showToast(`Program "${progName}" berhasil dihapus.`);
   };
 
   // Programs in selected year
@@ -397,13 +432,53 @@ export default function App() {
     );
   }, [programs, selectedYear]);
 
-  // Month counts calculation for month filter tabs
+  // Hitung jumlah program yang bersifat tentatif (belum ditentukan tanggal/bulannya)
+  const tentativeCount = useMemo(() => {
+    return programsInSelectedYear.filter(isTentatifProgram).length;
+  }, [programsInSelectedYear]);
+
+  // Month counts calculation for month filter tabs (hanya proker yang terjadwal pasti)
   const monthCounts = useMemo(() => {
     return BULAN_LIST.map((m) => {
-      const count = programsInSelectedYear.filter((p) => p.bulanPelaksanaan?.includes(m.no)).length;
+      const count = programsInSelectedYear.filter(
+        (p) => !isTentatifProgram(p) && p.bulanPelaksanaan?.includes(m.no)
+      ).length;
       return { ...m, count };
     });
   }, [programsInSelectedYear]);
+
+  // Active divisions with proker count in selected month
+  const activeSeksiInSelectedMonth = useMemo(() => {
+    const activeInMonth = programsInSelectedYear.filter((p) => {
+      if (selectedMonth !== 'all') {
+        if (selectedMonth === 'tentatif') {
+          return isTentatifProgram(p);
+        }
+        return !isTentatifProgram(p) && p.bulanPelaksanaan?.includes(selectedMonth as number);
+      }
+      return true;
+    });
+
+    return MASTER_DIVISIONS.map((div) => {
+      const count = activeInMonth.filter((p) => p.penanggungjawab?.divisi === div.nama).length;
+      return {
+        division: div,
+        count,
+      };
+    }).filter((item) => item.count > 0);
+  }, [programsInSelectedYear, selectedMonth]);
+
+  // Auto-reset selectedSeksi jika seksi tidak memiliki program di bulan yang baru dipilih
+  useEffect(() => {
+    if (selectedSeksi !== 'all') {
+      const isAvailable = activeSeksiInSelectedMonth.some(
+        (item) => item.division.nama === selectedSeksi
+      );
+      if (!isAvailable) {
+        setSelectedSeksi('all');
+      }
+    }
+  }, [selectedMonth, activeSeksiInSelectedMonth, selectedSeksi]);
 
   // Overall budget summary
   const totalAnggaran = useMemo(() => {
@@ -429,7 +504,9 @@ export default function App() {
         className={`w-full bg-slate-50 min-h-screen flex flex-col relative transition-all ${
           isMobileDeviceFrame
             ? 'max-w-[430px] rounded-[36px] shadow-2xl border-4 border-slate-300 overflow-hidden min-h-[850px]'
-            : 'max-w-xl md:max-w-2xl mx-auto shadow-sm'
+            : activeTab === 'dashboard'
+            ? 'w-full max-w-5xl lg:max-w-6xl mx-auto shadow-sm'
+            : 'w-full max-w-xl md:max-w-2xl mx-auto shadow-sm'
         }`}
       >
         {/* Device Status Bar Simulation */}
@@ -522,135 +599,289 @@ export default function App() {
             </div>
           </div>
 
-          {/* FILTER DRAGDOWN: TAHUN, BULAN, & SEKSI (HANYA 1 BARIS & UKURAN LEBIH KECIL) */}
-          <div className="grid grid-cols-3 gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-            {/* 1. Dragdown Pilihan Tahun Anggaran */}
-            <div className="relative min-w-0">
-              <select
-                value={selectedYear}
-                onChange={(e) => {
-                  const val = e.target.value === 'all' ? 'all' : (parseInt(e.target.value, 10) as 2026 | 2027);
-                  setSelectedYear(val);
-                }}
-                className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
-                title="Filter Berdasarkan Tahun Anggaran"
-              >
-                <option value="all">Semua Tahun</option>
-                <option value={2026}>Tahun 2026</option>
-                <option value={2027}>Tahun 2027</option>
-              </select>
-              <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
-            </div>
-
-            {/* 2. Dragdown Pilihan Bulan Kegiatan */}
-            <div className="relative min-w-0">
-              <select
-                value={selectedMonth}
-                onChange={(e) => {
-                  const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10);
-                  setSelectedMonth(val);
-                }}
-                className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
-                title="Filter Berdasarkan Bulan Kegiatan"
-              >
-                <option value="all">Semua Bulan</option>
-                {monthCounts.map((m) => (
-                  <option key={m.no} value={m.no}>
-                    {m.singkatan || m.nama.slice(0, 3)} ({m.count})
-                  </option>
-                ))}
-              </select>
-              <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
-            </div>
-
-            {/* 3. Dragdown Pilihan Seksi / Unit Kerja */}
-            <div className="relative min-w-0">
-              <select
-                value={selectedSeksi}
-                onChange={(e) => setSelectedSeksi(e.target.value)}
-                className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
-                title="Filter Berdasarkan Seksi / Unit Kerja"
-              >
-                <option value="all">Semua Seksi</option>
-                {DAFTAR_DIVISI.map((div) => {
-                  const count = programs.filter(
-                    (p) =>
-                      p.penanggungjawab?.divisi === div &&
-                      (selectedYear === 'all' || p.tahun === selectedYear)
-                  ).length;
-                  return (
-                    <option key={div} value={div}>
-                      {div} {count > 0 ? `(${count})` : ''}
-                    </option>
-                  );
-                })}
-              </select>
-              <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
-            </div>
+          {/* TAB NAVIGASI: DASHBOARD vs INPUT & DETAIL PROGRAM */}
+          <div className="flex items-center p-0.5 bg-slate-200/80 rounded-lg">
+            <button
+              type="button"
+              onClick={() => setActiveTab('dashboard')}
+              className={`flex-1 py-1.5 px-3 rounded-md text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                activeTab === 'dashboard'
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <LayoutDashboard className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Dashboard Program</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('input')}
+              className={`flex-1 py-1.5 px-3 rounded-md text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                activeTab === 'input'
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Input & Detail Program</span>
+            </button>
           </div>
 
-          {/* 3. DROPDOWN (DRAGDOWN) PEMILIHAN PROGRAM & PREV/NEXT NAVIGATION */}
-          <div className="bg-slate-100/80 p-1.5 rounded-lg border border-slate-200">
-            <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500 mb-1 px-0.5">
-              <span>Pilih Program Kerja:</span>
-              <span className="tabular-nums">
-                {filteredPrograms.length > 0
-                  ? `Data ${currentIndex + 1} dari ${filteredPrograms.length}`
-                  : '0 data'}
-              </span>
-            </div>
+          {/* KONTROL KHUSUS TAB DASHBOARD: PILIHAN PERIODE & SEKSI TETAP DI ATAS SAAT SCROLL DOWN SEPERTI JUDUL */}
+          {activeTab === 'dashboard' && (
+            <div className="bg-slate-50 p-1.5 rounded-xl border border-slate-200/90 shadow-2xs space-y-1.5">
+              <div className="flex items-center justify-between text-[10.5px] font-bold text-slate-800 px-0.5">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="truncate">Pilihan Periode & Seksi:</span>
+                </div>
 
-            <div className="flex items-center gap-1.5">
-              {/* Tombol Sebelumnya */}
-              <button
-                type="button"
-                onClick={handlePrev}
-                disabled={currentIndex <= 0}
-                className="w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors shadow-2xs"
-                title="Pilih Data Sebelumnya"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-
-              {/* The Dragdown / Dropdown Selector */}
-              <div className="flex-1 relative min-w-0">
-                <select
-                  value={currentId}
-                  onChange={(e) => setCurrentId(e.target.value)}
-                  className="w-full h-8 bg-white border border-slate-300 rounded-md px-2 pr-6 text-[11px] font-bold text-slate-900 truncate focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs"
-                >
-                  {filteredPrograms.length === 0 ? (
-                    <option value="">(Tidak ada program yang cocok dengan filter)</option>
-                  ) : (
-                    filteredPrograms.map((p, idx) => (
-                      <option key={p.id} value={p.id}>
-                        {idx + 1}. [{p.tahun}] {p.namaProgram} · {formatRupiah(p.estimasiAnggaran)}
-                      </option>
-                    ))
-                  )}
-                </select>
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[9px]">
-                  ▼
-                </span>
+                {/* Tahun Pill Selector */}
+                <div className="flex items-center p-0.5 bg-slate-200/70 rounded-md text-[9.5px] font-bold shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedYear(2026)}
+                    className={`px-1.5 py-0.5 rounded transition-all ${
+                      selectedYear === 2026 ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    2026
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedYear(2027)}
+                    className={`px-1.5 py-0.5 rounded transition-all ${
+                      selectedYear === 2027 ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    2027
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedYear('all')}
+                    className={`px-1.5 py-0.5 rounded transition-all ${
+                      selectedYear === 'all' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Semua
+                  </button>
+                </div>
               </div>
 
-              {/* Tombol Berikutnya */}
-              <button
-                type="button"
-                onClick={handleNext}
-                disabled={currentIndex >= filteredPrograms.length - 1}
-                className="w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors shadow-2xs"
-                title="Pilih Data Berikutnya"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
+              {/* HANYA 1 BARIS: DRAGDOWN BULAN & DRAGDOWN SEKSI */}
+              <div className="grid grid-cols-2 gap-1.5 w-full">
+                {/* Dragdown Pilihan Bulan */}
+                <div className="relative min-w-0">
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => {
+                      const val = e.target.value === 'all' || e.target.value === 'tentatif'
+                        ? e.target.value
+                        : parseInt(e.target.value, 10);
+                      setSelectedMonth(val);
+                    }}
+                    className="w-full h-7.5 bg-white border border-slate-300 rounded-lg pl-2 pr-6 text-[10.5px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                    title="Pilih Bulan Kegiatan"
+                  >
+                    <option value="all">Semua Bulan ({programsInSelectedYear.length} proker)</option>
+                    <option value="tentatif">📌 Tentatif / Belum Ditentukan ({tentativeCount} proker)</option>
+                    {monthCounts.map((m) => (
+                      <option key={m.no} value={m.no}>
+                        Bulan {m.nama} ({m.count} proker)
+                      </option>
+                    ))}
+                  </select>
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[9px]">
+                    ▼
+                  </span>
+                </div>
+
+                {/* Dragdown Pilihan Seksi */}
+                <div className="relative min-w-0">
+                  <select
+                    value={selectedSeksi}
+                    onChange={(e) => setSelectedSeksi(e.target.value)}
+                    className="w-full h-7.5 bg-white border border-slate-300 rounded-lg pl-2 pr-6 text-[10.5px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                    title="Pilih Seksi Tertentu"
+                    disabled={activeSeksiInSelectedMonth.length === 0}
+                  >
+                    {activeSeksiInSelectedMonth.length === 0 ? (
+                      <option value="all">Tidak ada seksi aktif di bulan ini</option>
+                    ) : (
+                      <>
+                        <option value="all">
+                          Semua Seksi Berjalan ({activeSeksiInSelectedMonth.length} seksi)
+                        </option>
+                        {activeSeksiInSelectedMonth.map((item) => (
+                          <option key={item.division.id} value={item.division.nama}>
+                            {item.division.nama} ({item.count} proker)
+                          </option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[9px]">
+                    ▼
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* KONTROL KHUSUS TAB INPUT: FILTER 1 BARIS & DROPDOWN PEMILIH PROGRAM */}
+          {activeTab === 'input' && (
+            <>
+              {/* FILTER DRAGDOWN: TAHUN, BULAN, & SEKSI (HANYA 1 BARIS & UKURAN LEBIH KECIL) */}
+              <div className="grid grid-cols-3 gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                {/* 1. Dragdown Pilihan Tahun Anggaran */}
+                <div className="relative min-w-0">
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => {
+                      const val = e.target.value === 'all' ? 'all' : (parseInt(e.target.value, 10) as 2026 | 2027);
+                      setSelectedYear(val);
+                    }}
+                    className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                    title="Filter Berdasarkan Tahun Anggaran"
+                  >
+                    <option value="all">Semua Tahun</option>
+                    <option value={2026}>Tahun 2026</option>
+                    <option value={2027}>Tahun 2027</option>
+                  </select>
+                  <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
+                </div>
+
+                {/* 2. Dragdown Pilihan Bulan Kegiatan */}
+                <div className="relative min-w-0">
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => {
+                      const val = e.target.value === 'all' || e.target.value === 'tentatif'
+                        ? e.target.value
+                        : parseInt(e.target.value, 10);
+                      setSelectedMonth(val);
+                    }}
+                    className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                    title="Filter Berdasarkan Bulan Kegiatan"
+                  >
+                    <option value="all">Semua Bulan</option>
+                    <option value="tentatif">📌 Tentatif ({tentativeCount})</option>
+                    {monthCounts.map((m) => (
+                      <option key={m.no} value={m.no}>
+                        {m.singkatan || m.nama.slice(0, 3)} ({m.count})
+                      </option>
+                    ))}
+                  </select>
+                  <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
+                </div>
+
+                {/* 3. Dragdown Pilihan Seksi / Unit Kerja */}
+                <div className="relative min-w-0">
+                  <select
+                    value={selectedSeksi}
+                    onChange={(e) => setSelectedSeksi(e.target.value)}
+                    className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                    title="Filter Berdasarkan Seksi / Unit Kerja"
+                  >
+                    <option value="all">Semua Seksi</option>
+                    {DAFTAR_DIVISI.map((div) => {
+                      const count = programs.filter(
+                        (p) =>
+                          p.penanggungjawab?.divisi === div &&
+                          (selectedYear === 'all' || p.tahun === selectedYear)
+                      ).length;
+                      return (
+                        <option key={div} value={div}>
+                          {div} {count > 0 ? `(${count})` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
+                </div>
+              </div>
+
+              {/* 3. DROPDOWN (DRAGDOWN) PEMILIHAN PROGRAM & PREV/NEXT NAVIGATION */}
+              <div className="bg-slate-100/80 p-1.5 rounded-lg border border-slate-200">
+                <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500 mb-1 px-0.5">
+                  <span>Pilih Program Kerja:</span>
+                  <span className="tabular-nums">
+                    {filteredPrograms.length > 0
+                      ? `Data ${currentIndex + 1} dari ${filteredPrograms.length}`
+                      : '0 data'}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  {/* Tombol Sebelumnya */}
+                  <button
+                    type="button"
+                    onClick={handlePrev}
+                    disabled={currentIndex <= 0}
+                    className="w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors shadow-2xs"
+                    title="Pilih Data Sebelumnya"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* The Dragdown / Dropdown Selector */}
+                  <div className="flex-1 relative min-w-0">
+                    <select
+                      value={currentId}
+                      onChange={(e) => setCurrentId(e.target.value)}
+                      className="w-full h-8 bg-white border border-slate-300 rounded-md px-2 pr-6 text-[11px] font-bold text-slate-900 truncate focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs"
+                    >
+                      {filteredPrograms.length === 0 ? (
+                        <option value="">(Tidak ada program yang cocok dengan filter)</option>
+                      ) : (
+                        filteredPrograms.map((p, idx) => (
+                          <option key={p.id} value={p.id}>
+                            {idx + 1}. [{p.tahun}] {p.namaProgram} · {formatRupiah(p.estimasiAnggaran)}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[9px]">
+                      ▼
+                    </span>
+                  </div>
+
+                  {/* Tombol Berikutnya */}
+                  <button
+                    type="button"
+                    onClick={handleNext}
+                    disabled={currentIndex >= filteredPrograms.length - 1}
+                    className="w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors shadow-2xs"
+                    title="Pilih Data Berikutnya"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </header>
 
-        {/* 4. MAIN BODY FORM & DATA VIEW (Semua di 1 Layar) */}
-        <main className="flex-1 px-4 py-3 pb-24 overflow-y-auto space-y-4">
-          {filteredPrograms.length === 0 ? (
+        {/* 4. MAIN BODY: DASHBOARD ATAU FORM INPUT & DETAIL PROGRAM */}
+        <main className="flex-1 px-3 sm:px-4 py-3 pb-24 overflow-y-auto space-y-4">
+          {activeTab === 'dashboard' ? (
+            <DashboardView
+              programs={programs}
+              selectedYear={selectedYear}
+              onSelectYear={setSelectedYear}
+              selectedMonth={selectedMonth}
+              onSelectMonth={setSelectedMonth}
+              selectedSeksi={selectedSeksi}
+              onSelectSeksi={setSelectedSeksi}
+              onOpenProgramDetail={(progId) => {
+                setCurrentId(progId);
+                setActiveTab('input');
+              }}
+              onInputProgramForSeksi={(seksiName) => {
+                handleCreateProgramForSeksi(seksiName, getDefaultPicForDivisi(seksiName));
+              }}
+            />
+          ) : filteredPrograms.length === 0 ? (
             /* Empty State if filter yields no items */
             <div className="bg-white rounded-2xl p-8 border border-dashed border-slate-300 text-center space-y-3 mt-4">
               <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
@@ -859,13 +1090,55 @@ export default function App() {
                       onChange={(e) => handleTipeJadwalChange(e.target.value as ScheduleType)}
                       className="w-full h-9 bg-slate-50 border border-slate-300 rounded-xl px-3 pr-8 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs"
                     >
-                      <option value="sepanjang_tahun">Sepanjang Tahun (Rutin 12 Bulan Penuh)</option>
-                      <option value="multi_bulan">Multi Bulan Terjadwal (Beberapa Bulan Tertentu)</option>
+                      <option value="tentatif">📌 Bersifat Tentatif (Belum Ada Bulan / Tanggal Pasti)</option>
                       <option value="satu_kali">Satu Kali Pelaksanaan (1 Bulan Tertentu)</option>
+                      <option value="multi_bulan">Multi Bulan Terjadwal (Beberapa Bulan Tertentu)</option>
+                      <option value="sepanjang_tahun">Sepanjang Tahun (Rutin 12 Bulan Penuh)</option>
                     </select>
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
                   </div>
                 </div>
+
+                {/* Sub-UI: Tentatif (Waktu Belum Ditentukan) */}
+                {formData.tipeJadwal === 'tentatif' && (
+                  <div className="p-3.5 bg-amber-50/90 border border-amber-300/80 rounded-2xl space-y-2.5">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 font-bold shadow-2xs text-sm">
+                        📌
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="text-xs font-bold text-amber-950">
+                            Program Bersifat Tentatif
+                          </h4>
+                          <span className="text-[9px] font-bold text-amber-800 bg-white px-1.5 py-0.2 rounded border border-amber-200">
+                            Waktu Ditentukan Saat Pelaksanaan
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-amber-900 leading-relaxed mt-1">
+                          Program kerja ini disetujui namun belum memiliki bulan atau tanggal tertentu untuk pelaksanaannya.
+                          Waktu pelaksanaan nantinya akan ditentukan dan disepakati pada saat waktu pelaksanaan tiba.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-amber-200/80">
+                      <label className="block text-[11px] font-bold text-amber-950 mb-1">
+                        Keterangan Tambahan / Estimasi Pelaksanaan (Opsional):
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.tanggalSpesifik || ''}
+                        onChange={(e) => {
+                          setFormData((prev) => ({ ...prev, tanggalSpesifik: e.target.value }));
+                          setHasUnsavedChanges(true);
+                        }}
+                        placeholder="Contoh: Menunggu keputusan rapat pleno / perkiraan Semester II / menyesuaikan kalender paroki"
+                        className="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Sub-UI: Sepanjang Tahun */}
                 {formData.tipeJadwal === 'sepanjang_tahun' && (
@@ -1318,12 +1591,12 @@ export default function App() {
 
                   <button
                     type="button"
-                    onClick={handleDelete}
-                    className="h-10 px-3 rounded-xl border border-rose-200 bg-rose-50/50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    onClick={handleDeleteClick}
+                    className="h-10 px-3 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
                     title="Hapus Program Ini"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Hapus</span>
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Hapus</span>
                   </button>
                 </div>
 
@@ -1343,51 +1616,55 @@ export default function App() {
             </div>
           ) : null}
 
-          {/* Quick Summary Strip at bottom of the 1 screen */}
-          <div className="bg-white rounded-xl p-3 border border-slate-200/80 shadow-2xs flex items-center justify-between text-xs">
-            <div>
-              <span className="text-slate-500">Total Program: </span>
-              <span className="font-bold text-slate-900 tabular-nums">
-                {filteredPrograms.length} proker
-              </span>
+          {/* Quick Summary Strip at bottom of the 1 screen (khusus tab input) */}
+          {activeTab === 'input' && (
+            <div className="bg-white rounded-xl p-3 border border-slate-200/80 shadow-2xs flex items-center justify-between text-xs">
+              <div>
+                <span className="text-slate-500">Total Program: </span>
+                <span className="font-bold text-slate-900 tabular-nums">
+                  {filteredPrograms.length} proker
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-slate-500">Total Anggaran: </span>
+                <span className="font-bold text-emerald-800 tabular-nums">
+                  {formatRupiah(totalAnggaran)}
+                </span>
+              </div>
             </div>
-            <div className="text-right">
-              <span className="text-slate-500">Total Anggaran: </span>
-              <span className="font-bold text-emerald-800 tabular-nums">
-                {formatRupiah(totalAnggaran)}
-              </span>
-            </div>
-          </div>
+          )}
         </main>
 
-        {/* 5. FIXED BOTTOM STICKY BAR: PREV / NEXT NAVIGATION (Memilih data berikutnya dalam 1 sentuhan) */}
-        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-lg">
-          <div className="max-w-xl md:max-w-2xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={handlePrev}
-              disabled={currentIndex <= 0}
-              className="flex-1 h-10 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-30 disabled:pointer-events-none transition-colors"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span>Sebelumnya</span>
-            </button>
+        {/* 5. FIXED BOTTOM STICKY BAR: PREV / NEXT NAVIGATION (Hanya saat tab Input / Detail aktif) */}
+        {activeTab === 'input' && (
+          <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-lg">
+            <div className="max-w-xl md:max-w-2xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={handlePrev}
+                disabled={currentIndex <= 0}
+                className="flex-1 h-10 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>Sebelumnya</span>
+              </button>
 
-            <span className="text-[11px] font-bold text-slate-500 tabular-nums shrink-0 px-1">
-              {filteredPrograms.length > 0 ? `${currentIndex + 1} / ${filteredPrograms.length}` : '0 / 0'}
-            </span>
+              <span className="text-[11px] font-bold text-slate-500 tabular-nums shrink-0 px-1">
+                {filteredPrograms.length > 0 ? `${currentIndex + 1} / ${filteredPrograms.length}` : '0 / 0'}
+              </span>
 
-            <button
-              type="button"
-              onClick={handleNext}
-              disabled={currentIndex >= filteredPrograms.length - 1}
-              className="flex-1 h-10 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-30 disabled:pointer-events-none transition-colors shadow-xs"
-            >
-              <span>Berikutnya</span>
-              <ChevronRight className="w-4 h-4 text-emerald-400" />
-            </button>
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={currentIndex >= filteredPrograms.length - 1}
+                className="flex-1 h-10 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-30 disabled:pointer-events-none transition-colors shadow-xs"
+              >
+                <span>Berikutnya</span>
+                <ChevronRight className="w-4 h-4 text-emerald-400" />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Modal Pemilihan Seksi untuk Input Program Kerja Baru */}
         <SelectSeksiModal
@@ -1396,6 +1673,15 @@ export default function App() {
           onSelectSeksi={handleCreateProgramForSeksi}
           selectedYear={selectedYear === 'all' ? 2026 : selectedYear}
           existingPrograms={programs}
+        />
+
+        {/* Modal Konfirmasi Hapus Program */}
+        <DeleteConfirmModal
+          isOpen={isDeleteModalOpen}
+          program={currentProgram}
+          canDelete={programs.length > 1}
+          onClose={() => setIsDeleteModalOpen(false)}
+          onConfirm={handleExecuteDelete}
         />
       </div>
     </div>

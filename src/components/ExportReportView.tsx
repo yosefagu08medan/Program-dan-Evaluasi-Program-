@@ -53,9 +53,6 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
         const res = await dbService.importBackup(content);
         if (res.success) {
           onRestoreData(dbService.getPrograms());
-          alert(res.message);
-        } else {
-          alert(res.message);
         }
       };
     }
@@ -143,11 +140,7 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
 
           <button
             type="button"
-            onClick={() => {
-              if (window.confirm('Kembalikan ke data contoh awal tahun 2026 dan 2027?')) {
-                onResetData();
-              }
-            }}
+            onClick={onResetData}
             className="text-xs font-semibold text-rose-600 hover:text-rose-800 flex items-center gap-1 py-1 px-2 rounded-md hover:bg-rose-50"
           >
             <RotateCcw className="w-3.5 h-3.5" />

@@ -1,4 +1,4 @@
-export type ScheduleType = 'sepanjang_tahun' | 'multi_bulan' | 'satu_kali';
+export type ScheduleType = 'sepanjang_tahun' | 'multi_bulan' | 'satu_kali' | 'tentatif';
 
 export type ProgramStatus = 'direncanakan' | 'berjalan' | 'selesai' | 'ditunda';
 
