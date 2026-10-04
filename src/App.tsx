@@ -445,59 +445,53 @@ export default function App() {
         )}
 
         {/* 1. HEADER (1 Layar) */}
-        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 pt-3 pb-2.5 space-y-2.5">
-          {/* Top Brand & Actions */}
-          <div className="flex items-start justify-between gap-2.5">
-            <div className="flex items-start gap-2.5 min-w-0 flex-1">
-              <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs mt-0.5">
-                <Calendar className="w-4 h-4 text-emerald-400" />
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 sm:px-4 pt-2 pb-2 space-y-1.5">
+          {/* Top Brand & Actions - Memanjang di Mobile dengan Tombol Kompak di Baris Bawah */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-2">
+            {/* Bagian Judul: Dibuat Memanjang Penuh di Mobile */}
+            <div className="flex items-center gap-2 min-w-0 w-full">
+              <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
               </div>
               <div className="min-w-0 flex-1">
-                <h1 className="text-xs sm:text-sm font-extrabold text-slate-900 leading-snug">
+                <h1 className="text-[11px] sm:text-xs md:text-sm font-extrabold text-slate-900 leading-snug break-words">
                   Program Kerja Paroki St Perawan Maria Yang Dikandung Tanpa Noda Katedral Keuskupan Agung Medan
                 </h1>
-                <p className="text-[10px] text-emerald-700 font-semibold mt-0.5">
-                  {selectedYear === 'all'
-                    ? 'Tahun Anggaran 2026 & 2027'
-                    : `Tahun Anggaran ${selectedYear}`}
-                </p>
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  <p className="text-[9px] sm:text-[10px] text-emerald-700 font-bold">
+                    {selectedYear === 'all'
+                      ? 'Tahun Anggaran 2026 & 2027'
+                      : `Tahun Anggaran ${selectedYear}`}
+                  </p>
+                  <span className="inline-flex items-center gap-1 text-[8.5px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded-full border border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Cloud Synced
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
-              {/* Export CSV Button */}
+            {/* Menu Aksi (Download, Input Seksi, + Baru) Dibuat Lebih Kecil & Kompak */}
+            <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
+              {/* Export / Download CSV Button */}
               <button
                 type="button"
                 onClick={() => exportToCSV(programs)}
-                className="h-8 px-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 flex items-center gap-1 transition-colors"
+                className="flex-1 sm:flex-none h-7 px-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-[10px] font-bold text-slate-700 flex items-center justify-center gap-1 transition-colors shadow-2xs"
                 title="Unduh Data ke CSV / Excel"
               >
-                <Download className="w-3.5 h-3.5 text-slate-500" />
-                <span className="hidden sm:inline">Excel</span>
+                <Download className="w-3 h-3 text-slate-600" />
+                <span>Download</span>
               </button>
 
-              {/* Toggle HP Frame mode on desktop */}
-              <button
-                type="button"
-                onClick={() => setIsMobileDeviceFrame(!isMobileDeviceFrame)}
-                className="hidden md:flex h-8 px-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 items-center justify-center"
-                title="Ubah Tampilan Mode HP / Lebar"
-              >
-                {isMobileDeviceFrame ? (
-                  <Monitor className="w-3.5 h-3.5" />
-                ) : (
-                  <Smartphone className="w-3.5 h-3.5" />
-                )}
-              </button>
-
-              {/* Input Program per Seksi Button (New Dialog) */}
+              {/* Input Program per Seksi Button */}
               <button
                 type="button"
                 onClick={() => setIsSelectSeksiModalOpen(true)}
-                className="h-8 px-2.5 sm:px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-colors"
+                className="flex-1 sm:flex-none h-7 px-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold flex items-center justify-center gap-1 shadow-xs transition-colors"
                 title="Pilih seksi untuk input program kerja baru"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-3 h-3" />
                 <span>Input Seksi</span>
               </button>
 
@@ -505,116 +499,99 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleAddNew}
-                className="h-8 px-2.5 sm:px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-colors"
+                className="flex-1 sm:flex-none h-7 px-2.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold flex items-center justify-center gap-1 shadow-xs transition-colors"
+                title="Tambah Program Baru"
               >
-                <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                <Plus className="w-3 h-3 text-emerald-400" />
                 <span>+ Baru</span>
+              </button>
+
+              {/* Toggle HP Frame mode on desktop */}
+              <button
+                type="button"
+                onClick={() => setIsMobileDeviceFrame(!isMobileDeviceFrame)}
+                className="hidden md:flex h-7 px-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 items-center justify-center shrink-0 text-[10px]"
+                title="Ubah Tampilan Mode HP / Lebar"
+              >
+                {isMobileDeviceFrame ? (
+                  <Monitor className="w-3 h-3" />
+                ) : (
+                  <Smartphone className="w-3 h-3" />
+                )}
               </button>
             </div>
           </div>
 
-          {/* FILTER DRAGDOWN: TAHUN, BULAN, & SEKSI */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+          {/* FILTER DRAGDOWN: TAHUN, BULAN, & SEKSI (HANYA 1 BARIS & UKURAN LEBIH KECIL) */}
+          <div className="grid grid-cols-3 gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
             {/* 1. Dragdown Pilihan Tahun Anggaran */}
-            <div>
-              <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                Tahun Anggaran:
-              </label>
-              <div className="relative">
-                <select
-                  value={selectedYear}
-                  onChange={(e) => {
-                    const val = e.target.value === 'all' ? 'all' : (parseInt(e.target.value, 10) as 2026 | 2027);
-                    setSelectedYear(val);
-                  }}
-                  className="w-full h-9 bg-white border border-slate-300 rounded-lg px-2.5 pr-7 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-500 cursor-pointer shadow-2xs"
-                >
-                  <option value="all">Semua Tahun (2026 & 2027)</option>
-                  <option value={2026}>Tahun Anggaran 2026</option>
-                  <option value={2027}>Tahun Anggaran 2027</option>
-                </select>
-                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
-              </div>
+            <div className="relative min-w-0">
+              <select
+                value={selectedYear}
+                onChange={(e) => {
+                  const val = e.target.value === 'all' ? 'all' : (parseInt(e.target.value, 10) as 2026 | 2027);
+                  setSelectedYear(val);
+                }}
+                className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                title="Filter Berdasarkan Tahun Anggaran"
+              >
+                <option value="all">Semua Tahun</option>
+                <option value={2026}>Tahun 2026</option>
+                <option value={2027}>Tahun 2027</option>
+              </select>
+              <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
             </div>
 
             {/* 2. Dragdown Pilihan Bulan Kegiatan */}
-            <div>
-              <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                <span>Bulan Kegiatan:</span>
-                {selectedMonth !== 'all' && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedMonth('all')}
-                    className="text-emerald-700 hover:underline normal-case font-bold"
-                  >
-                    Reset
-                  </button>
-                )}
-              </div>
-              <div className="relative">
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => {
-                    const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10);
-                    setSelectedMonth(val);
-                  }}
-                  className="w-full h-9 bg-white border border-slate-300 rounded-lg px-2.5 pr-7 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-500 cursor-pointer shadow-2xs"
-                >
-                  <option value="all">
-                    Semua Bulan (12 Bln)
+            <div className="relative min-w-0">
+              <select
+                value={selectedMonth}
+                onChange={(e) => {
+                  const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10);
+                  setSelectedMonth(val);
+                }}
+                className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                title="Filter Berdasarkan Bulan Kegiatan"
+              >
+                <option value="all">Semua Bulan</option>
+                {monthCounts.map((m) => (
+                  <option key={m.no} value={m.no}>
+                    {m.singkatan || m.nama.slice(0, 3)} ({m.count})
                   </option>
-                  {monthCounts.map((m) => (
-                    <option key={m.no} value={m.no}>
-                      {m.nama} ({m.count})
-                    </option>
-                  ))}
-                </select>
-                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
-              </div>
+                ))}
+              </select>
+              <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
             </div>
 
             {/* 3. Dragdown Pilihan Seksi / Unit Kerja */}
-            <div>
-              <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                <span>Seksi / Unit Kerja:</span>
-                {selectedSeksi !== 'all' && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedSeksi('all')}
-                    className="text-emerald-700 hover:underline normal-case font-bold"
-                  >
-                    Reset
-                  </button>
-                )}
-              </div>
-              <div className="relative">
-                <select
-                  value={selectedSeksi}
-                  onChange={(e) => setSelectedSeksi(e.target.value)}
-                  className="w-full h-9 bg-white border border-slate-300 rounded-lg px-2.5 pr-7 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-500 cursor-pointer shadow-2xs truncate"
-                >
-                  <option value="all">Semua Seksi (16 Seksi)</option>
-                  {DAFTAR_DIVISI.map((div) => {
-                    const count = programs.filter(
-                      (p) =>
-                        p.penanggungjawab?.divisi === div &&
-                        (selectedYear === 'all' || p.tahun === selectedYear)
-                    ).length;
-                    return (
-                      <option key={div} value={div}>
-                        {div} {count > 0 ? `(${count})` : ''}
-                      </option>
-                    );
-                  })}
-                </select>
-                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
-              </div>
+            <div className="relative min-w-0">
+              <select
+                value={selectedSeksi}
+                onChange={(e) => setSelectedSeksi(e.target.value)}
+                className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                title="Filter Berdasarkan Seksi / Unit Kerja"
+              >
+                <option value="all">Semua Seksi</option>
+                {DAFTAR_DIVISI.map((div) => {
+                  const count = programs.filter(
+                    (p) =>
+                      p.penanggungjawab?.divisi === div &&
+                      (selectedYear === 'all' || p.tahun === selectedYear)
+                  ).length;
+                  return (
+                    <option key={div} value={div}>
+                      {div} {count > 0 ? `(${count})` : ''}
+                    </option>
+                  );
+                })}
+              </select>
+              <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
             </div>
           </div>
 
           {/* 3. DROPDOWN (DRAGDOWN) PEMILIHAN PROGRAM & PREV/NEXT NAVIGATION */}
-          <div className="bg-slate-100/80 p-2 rounded-xl border border-slate-200">
-            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 mb-1">
+          <div className="bg-slate-100/80 p-1.5 rounded-lg border border-slate-200">
+            <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500 mb-1 px-0.5">
               <span>Pilih Program Kerja:</span>
               <span className="tabular-nums">
                 {filteredPrograms.length > 0
@@ -629,10 +606,10 @@ export default function App() {
                 type="button"
                 onClick={handlePrev}
                 disabled={currentIndex <= 0}
-                className="w-9 h-9 rounded-lg border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors"
+                className="w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors shadow-2xs"
                 title="Pilih Data Sebelumnya"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-3.5 h-3.5" />
               </button>
 
               {/* The Dragdown / Dropdown Selector */}
@@ -640,7 +617,7 @@ export default function App() {
                 <select
                   value={currentId}
                   onChange={(e) => setCurrentId(e.target.value)}
-                  className="w-full h-9 bg-white border border-slate-300 rounded-lg px-2.5 pr-7 text-xs font-bold text-slate-900 truncate focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-500 cursor-pointer shadow-2xs"
+                  className="w-full h-8 bg-white border border-slate-300 rounded-md px-2 pr-6 text-[11px] font-bold text-slate-900 truncate focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs"
                 >
                   {filteredPrograms.length === 0 ? (
                     <option value="">(Tidak ada program yang cocok dengan filter)</option>
@@ -652,7 +629,7 @@ export default function App() {
                     ))
                   )}
                 </select>
-                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[9px]">
                   ▼
                 </span>
               </div>
@@ -662,10 +639,10 @@ export default function App() {
                 type="button"
                 onClick={handleNext}
                 disabled={currentIndex >= filteredPrograms.length - 1}
-                className="w-9 h-9 rounded-lg border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors"
+                className="w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors shadow-2xs"
                 title="Pilih Data Berikutnya"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
