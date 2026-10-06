@@ -41,13 +41,17 @@ import {
   generateJadwalBulanan,
   formatIndonesianDate,
   toISODateString,
-  isTentatifProgram,
+  isPelayananRutin,
+  isDivisionMatch,
+  normalizeDivisionName,
 } from './utils/formatters';
 import dbService from '../database';
 import { getDefaultPicForDivisi, MASTER_DIVISIONS } from '../database/master-data/divisions';
 import { SelectSeksiModal } from './components/SelectSeksiModal';
 import { DashboardView } from './components/DashboardView';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
+import { EvaluasiModal } from './components/EvaluasiModal';
+import { EvaluasiProgram } from './types/proker';
 
 export default function App() {
   // 1. Data Store from DatabaseService with automatic migration execution and Cloud Firestore sync
@@ -74,12 +78,13 @@ export default function App() {
   // 2. Filters & Navigation Tabs
   const [activeTab, setActiveTab] = useState<'dashboard' | 'input'>('dashboard');
   const [selectedYear, setSelectedYear] = useState<'all' | 2026 | 2027>('all');
-  const [selectedMonth, setSelectedMonth] = useState<number | 'all' | 'tentatif'>('all'); // Default 'all' atau bulan tertentu
+  const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all'); // Default 'all' atau bulan tertentu (1-12)
   const [selectedSeksi, setSelectedSeksi] = useState<string | 'all'>('all'); // Filter berdasarkan Seksi/Divisi
   const [isSelectSeksiModalOpen, setIsSelectSeksiModalOpen] = useState<boolean>(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState<boolean>(false);
   const [isMobileDeviceFrame, setIsMobileDeviceFrame] = useState<boolean>(false);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
+  const [evaluatingProgram, setEvaluatingProgram] = useState<ProgramKerja | null>(null);
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -88,23 +93,35 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 2500);
   };
 
-  // 3. Filtered programs list based on Tahun, Bulan, & Seksi (mendukung opsi tentatif)
+  // Simpan hasil evaluasi program kerja (terlaksana / tidak terlaksana)
+  const handleSaveEvaluasi = (programId: string, evaluasiData: EvaluasiProgram) => {
+    const prog = programs.find((p) => p.id === programId);
+    if (!prog) return;
+    const updated: ProgramKerja = {
+      ...prog,
+      evaluasi: evaluasiData,
+      status: evaluasiData.statusKeterlaksanaan === 'terlaksana' ? 'selesai' : prog.status,
+      updatedAt: new Date().toISOString(),
+    };
+    dbService.saveProgram(updated);
+    if (currentId === programId) {
+      setFormData(updated);
+    }
+    showToast(`Evaluasi untuk "${prog.namaProgram}" berhasil disimpan!`);
+  };
+
+  // 3. Filtered programs list based on Tahun, Bulan, & Seksi
   const filteredPrograms = useMemo(() => {
     return programs.filter((p) => {
       // Filter Tahun
       if (selectedYear !== 'all' && p.tahun !== selectedYear) return false;
       // Filter Bulan Kegiatan
       if (selectedMonth !== 'all') {
-        if (selectedMonth === 'tentatif') {
-          if (!isTentatifProgram(p)) return false;
-        } else {
-          if (isTentatifProgram(p) || !p.bulanPelaksanaan?.includes(selectedMonth as number)) {
-            return false;
-          }
-        }
+        const isMatch = p.bulanPelaksanaan?.includes(selectedMonth) || isPelayananRutin(p);
+        if (!isMatch) return false;
       }
-      // Filter Seksi
-      if (selectedSeksi !== 'all' && p.penanggungjawab?.divisi !== selectedSeksi) {
+      // Filter Seksi / DPPH
+      if (selectedSeksi !== 'all' && !isDivisionMatch(p.penanggungjawab?.divisi, selectedSeksi)) {
         return false;
       }
       return true;
@@ -186,7 +203,7 @@ export default function App() {
     setHasUnsavedChanges(true);
   };
 
-  // Schedule Type Change (Mendukung tipe tentatif)
+  // Schedule Type Change (Pelayanan Rutin Sepanjang Tahun, Multi Bulan, Satu Kali)
   const handleTipeJadwalChange = (tipe: ScheduleType) => {
     setFormData((prev) => {
       let bulan = prev.bulanPelaksanaan || [];
@@ -194,19 +211,15 @@ export default function App() {
       let modeTgl = prev.modeTanggal;
       let tglSpesifik = prev.tanggalSpesifik;
 
-      if (tipe === 'tentatif') {
-        bulan = [];
-        jadwalBln = {};
-        modeTgl = 'akan_ditentukan';
-        tglSpesifik = prev.tanggalSpesifik || 'Tentatif (Waktu dan tanggal belum ditentukan)';
-      } else if (tipe === 'sepanjang_tahun') {
+      if (tipe === 'sepanjang_tahun') {
         bulan = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         modeTgl = 'rutin_berkala';
+        tglSpesifik = prev.tanggalSpesifik || 'Pelayanan rutin setiap bulan sepanjang tahun';
         if (!jadwalBln || Object.keys(jadwalBln).length === 0) {
           jadwalBln = generateJadwalBulanan(prev.tahun || 2026, 'selasa_pertama');
         }
       } else if (tipe === 'satu_kali') {
-        bulan = bulan.length > 0 ? [bulan[0]] : [1];
+        bulan = bulan.length > 0 ? [bulan[0]] : [selectedMonth === 'all' ? 1 : selectedMonth];
         modeTgl = 'tanggal_pasti';
       } else {
         if (bulan.length === 12 || bulan.length === 0) {
@@ -285,7 +298,7 @@ export default function App() {
     if (!formData.tujuanKegiatan?.trim()) errors.tujuanKegiatan = 'Tujuan kegiatan wajib diisi';
     if (!formData.targetSasaran?.trim()) errors.targetSasaran = 'Target sasaran wajib diisi';
     if (!formData.penanggungjawab?.nama?.trim()) errors.pjNama = 'Nama PJ wajib diisi';
-    if (formData.tipeJadwal !== 'tentatif' && (!formData.bulanPelaksanaan || formData.bulanPelaksanaan.length === 0)) {
+    if (!formData.bulanPelaksanaan || formData.bulanPelaksanaan.length === 0) {
       errors.bulanPelaksanaan = 'Pilih minimal 1 bulan pelaksanaan';
     }
     if (formData.tipeJadwal === 'sepanjang_tahun') {
@@ -317,7 +330,8 @@ export default function App() {
   // Create new program for specific selected Seksi
   const handleCreateProgramForSeksi = (seksiName: string, defaultPicName: string) => {
     const targetTahun = selectedYear === 'all' ? 2026 : selectedYear;
-    const initialBulan = selectedMonth === 'all' ? [1, 2, 3] : [selectedMonth as number];
+    const initialBulan: number[] = selectedMonth === 'all' ? [1, 2, 3] : [selectedMonth];
+    const initialTipe: ScheduleType = selectedMonth === 'all' ? 'multi_bulan' : 'satu_kali';
     const newId = `proker-${Date.now()}`;
     const newProg: ProgramKerja = {
       id: newId,
@@ -326,10 +340,10 @@ export default function App() {
       tujuanKegiatan: '',
       targetSasaran: '',
       estimasiAnggaran: 10000000,
-      tipeJadwal: selectedMonth === 'all' ? 'multi_bulan' : 'satu_kali',
+      tipeJadwal: initialTipe,
       bulanPelaksanaan: initialBulan,
-      modeTanggal: 'akan_ditentukan',
-      tanggalSpesifik: 'Tanggal akan ditentukan kemudian (Tentatif)',
+      modeTanggal: 'tanggal_pasti',
+      tanggalSpesifik: 'Tanggal akan ditentukan kemudian',
       penanggungjawab: {
         nama: defaultPicName,
         divisi: seksiName,
@@ -341,7 +355,7 @@ export default function App() {
     };
 
     // If currently filtered by a different seksi, reset or align filter to new seksi
-    if (selectedSeksi !== 'all' && selectedSeksi !== seksiName) {
+    if (selectedSeksi !== 'all' && !isDivisionMatch(selectedSeksi, seksiName)) {
       setSelectedSeksi('all');
     }
 
@@ -356,7 +370,8 @@ export default function App() {
     const targetTahun = selectedYear === 'all' ? 2026 : selectedYear;
     const targetSeksi = selectedSeksi !== 'all' ? selectedSeksi : DAFTAR_DIVISI[0];
     const defaultPic = getDefaultPicForDivisi(targetSeksi);
-    const initialBulan = selectedMonth === 'all' ? [1, 2, 3] : [selectedMonth];
+    const initialBulan: number[] = selectedMonth === 'all' ? [1, 2, 3] : [selectedMonth];
+    const initialTipe: ScheduleType = selectedMonth === 'all' ? 'multi_bulan' : 'satu_kali';
     const newId = `proker-${Date.now()}`;
     const newProg: ProgramKerja = {
       id: newId,
@@ -365,10 +380,10 @@ export default function App() {
       tujuanKegiatan: '',
       targetSasaran: '',
       estimasiAnggaran: 10000000,
-      tipeJadwal: selectedMonth === 'all' ? 'multi_bulan' : 'satu_kali',
+      tipeJadwal: initialTipe,
       bulanPelaksanaan: initialBulan,
-      modeTanggal: 'akan_ditentukan',
-      tanggalSpesifik: 'Tanggal akan ditentukan kemudian (Tentatif)',
+      modeTanggal: 'tanggal_pasti',
+      tanggalSpesifik: 'Tanggal akan ditentukan kemudian',
       penanggungjawab: {
         nama: defaultPic,
         divisi: targetSeksi,
@@ -432,16 +447,11 @@ export default function App() {
     );
   }, [programs, selectedYear]);
 
-  // Hitung jumlah program yang bersifat tentatif (belum ditentukan tanggal/bulannya)
-  const tentativeCount = useMemo(() => {
-    return programsInSelectedYear.filter(isTentatifProgram).length;
-  }, [programsInSelectedYear]);
-
-  // Month counts calculation for month filter tabs (hanya proker yang terjadwal pasti)
+  // Month counts calculation for month filter tabs (termasuk pelayanan rutin yang berjalan tiap bulan)
   const monthCounts = useMemo(() => {
     return BULAN_LIST.map((m) => {
       const count = programsInSelectedYear.filter(
-        (p) => !isTentatifProgram(p) && p.bulanPelaksanaan?.includes(m.no)
+        (p) => p.bulanPelaksanaan?.includes(m.no) || isPelayananRutin(p)
       ).length;
       return { ...m, count };
     });
@@ -451,16 +461,13 @@ export default function App() {
   const activeSeksiInSelectedMonth = useMemo(() => {
     const activeInMonth = programsInSelectedYear.filter((p) => {
       if (selectedMonth !== 'all') {
-        if (selectedMonth === 'tentatif') {
-          return isTentatifProgram(p);
-        }
-        return !isTentatifProgram(p) && p.bulanPelaksanaan?.includes(selectedMonth as number);
+        return p.bulanPelaksanaan?.includes(selectedMonth) || isPelayananRutin(p);
       }
       return true;
     });
 
     return MASTER_DIVISIONS.map((div) => {
-      const count = activeInMonth.filter((p) => p.penanggungjawab?.divisi === div.nama).length;
+      const count = activeInMonth.filter((p) => isDivisionMatch(p.penanggungjawab?.divisi, div.nama)).length;
       return {
         division: div,
         count,
@@ -468,11 +475,11 @@ export default function App() {
     }).filter((item) => item.count > 0);
   }, [programsInSelectedYear, selectedMonth]);
 
-  // Auto-reset selectedSeksi jika seksi tidak memiliki program di bulan yang baru dipilih
+  // Auto-reset selectedSeksi jika seksi/DPPH tidak memiliki program di bulan yang baru dipilih
   useEffect(() => {
     if (selectedSeksi !== 'all') {
       const isAvailable = activeSeksiInSelectedMonth.some(
-        (item) => item.division.nama === selectedSeksi
+        (item) => isDivisionMatch(item.division.nama, selectedSeksi)
       );
       if (!isAvailable) {
         setSelectedSeksi('all');
@@ -633,7 +640,7 @@ export default function App() {
               <div className="flex items-center justify-between text-[10.5px] font-bold text-slate-800 px-0.5">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span className="truncate">Pilihan Periode & Seksi:</span>
+                  <span className="truncate">Pilihan Periode, DPPH & Seksi:</span>
                 </div>
 
                 {/* Tahun Pill Selector */}
@@ -675,16 +682,13 @@ export default function App() {
                   <select
                     value={selectedMonth}
                     onChange={(e) => {
-                      const val = e.target.value === 'all' || e.target.value === 'tentatif'
-                        ? e.target.value
-                        : parseInt(e.target.value, 10);
+                      const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10);
                       setSelectedMonth(val);
                     }}
                     className="w-full h-7.5 bg-white border border-slate-300 rounded-lg pl-2 pr-6 text-[10.5px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
                     title="Pilih Bulan Kegiatan"
                   >
                     <option value="all">Semua Bulan ({programsInSelectedYear.length} proker)</option>
-                    <option value="tentatif">📌 Tentatif / Belum Ditentukan ({tentativeCount} proker)</option>
                     {monthCounts.map((m) => (
                       <option key={m.no} value={m.no}>
                         Bulan {m.nama} ({m.count} proker)
@@ -696,29 +700,29 @@ export default function App() {
                   </span>
                 </div>
 
-                {/* Dragdown Pilihan Seksi */}
+                {/* Dragdown Pilihan DPPH & Seksi */}
                 <div className="relative min-w-0">
                   <select
                     value={selectedSeksi}
                     onChange={(e) => setSelectedSeksi(e.target.value)}
                     className="w-full h-7.5 bg-white border border-slate-300 rounded-lg pl-2 pr-6 text-[10.5px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
-                    title="Pilih Seksi Tertentu"
-                    disabled={activeSeksiInSelectedMonth.length === 0}
+                    title="Pilih DPPH atau Seksi Tertentu"
                   >
-                    {activeSeksiInSelectedMonth.length === 0 ? (
-                      <option value="all">Tidak ada seksi aktif di bulan ini</option>
-                    ) : (
-                      <>
-                        <option value="all">
-                          Semua Seksi Berjalan ({activeSeksiInSelectedMonth.length} seksi)
+                    <option value="all">
+                      Semua Unit (DPPH & 15 Seksi) ({activeSeksiInSelectedMonth.length} aktif)
+                    </option>
+                    {/* DPPH di urutan pertama, lalu 15 Seksi */}
+                    {MASTER_DIVISIONS.map((div) => {
+                      const activeItem = activeSeksiInSelectedMonth.find((item) =>
+                        isDivisionMatch(item.division.nama, div.nama)
+                      );
+                      const count = activeItem ? activeItem.count : 0;
+                      return (
+                        <option key={div.id} value={div.nama}>
+                          {div.code === 'DPPH' ? '🏛️ ' : ''}{div.nama} ({count} proker)
                         </option>
-                        {activeSeksiInSelectedMonth.map((item) => (
-                          <option key={item.division.id} value={item.division.nama}>
-                            {item.division.nama} ({item.count} proker)
-                          </option>
-                        ))}
-                      </>
-                    )}
+                      );
+                    })}
                   </select>
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[9px]">
                     ▼
@@ -756,16 +760,13 @@ export default function App() {
                   <select
                     value={selectedMonth}
                     onChange={(e) => {
-                      const val = e.target.value === 'all' || e.target.value === 'tentatif'
-                        ? e.target.value
-                        : parseInt(e.target.value, 10);
+                      const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10);
                       setSelectedMonth(val);
                     }}
                     className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
                     title="Filter Berdasarkan Bulan Kegiatan"
                   >
                     <option value="all">Semua Bulan</option>
-                    <option value="tentatif">📌 Tentatif ({tentativeCount})</option>
                     {monthCounts.map((m) => (
                       <option key={m.no} value={m.no}>
                         {m.singkatan || m.nama.slice(0, 3)} ({m.count})
@@ -775,19 +776,19 @@ export default function App() {
                   <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
                 </div>
 
-                {/* 3. Dragdown Pilihan Seksi / Unit Kerja */}
+                {/* 3. Dragdown Pilihan DPPH / Seksi */}
                 <div className="relative min-w-0">
                   <select
                     value={selectedSeksi}
                     onChange={(e) => setSelectedSeksi(e.target.value)}
                     className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
-                    title="Filter Berdasarkan Seksi / Unit Kerja"
+                    title="Filter Berdasarkan DPPH / Seksi"
                   >
-                    <option value="all">Semua Seksi</option>
+                    <option value="all">Semua DPPH & Seksi</option>
                     {DAFTAR_DIVISI.map((div) => {
                       const count = programs.filter(
                         (p) =>
-                          p.penanggungjawab?.divisi === div &&
+                          isDivisionMatch(p.penanggungjawab?.divisi, div) &&
                           (selectedYear === 'all' || p.tahun === selectedYear)
                       ).length;
                       return (
@@ -879,6 +880,9 @@ export default function App() {
               }}
               onInputProgramForSeksi={(seksiName) => {
                 handleCreateProgramForSeksi(seksiName, getDefaultPicForDivisi(seksiName));
+              }}
+              onOpenEvaluasi={(prog) => {
+                setEvaluatingProgram(prog);
               }}
             />
           ) : filteredPrograms.length === 0 ? (
@@ -1090,62 +1094,20 @@ export default function App() {
                       onChange={(e) => handleTipeJadwalChange(e.target.value as ScheduleType)}
                       className="w-full h-9 bg-slate-50 border border-slate-300 rounded-xl px-3 pr-8 text-xs font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs"
                     >
-                      <option value="tentatif">📌 Bersifat Tentatif (Belum Ada Bulan / Tanggal Pasti)</option>
-                      <option value="satu_kali">Satu Kali Pelaksanaan (1 Bulan Tertentu)</option>
+                      <option value="sepanjang_tahun">Pelayanan Rutin (Sepanjang Tahun 12 Bulan)</option>
                       <option value="multi_bulan">Multi Bulan Terjadwal (Beberapa Bulan Tertentu)</option>
-                      <option value="sepanjang_tahun">Sepanjang Tahun (Rutin 12 Bulan Penuh)</option>
+                      <option value="satu_kali">Satu Kali Pelaksanaan (1 Bulan Tertentu)</option>
                     </select>
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▼</span>
                   </div>
                 </div>
 
-                {/* Sub-UI: Tentatif (Waktu Belum Ditentukan) */}
-                {formData.tipeJadwal === 'tentatif' && (
-                  <div className="p-3.5 bg-amber-50/90 border border-amber-300/80 rounded-2xl space-y-2.5">
-                    <div className="flex items-start gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 font-bold shadow-2xs text-sm">
-                        📌
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <h4 className="text-xs font-bold text-amber-950">
-                            Program Bersifat Tentatif
-                          </h4>
-                          <span className="text-[9px] font-bold text-amber-800 bg-white px-1.5 py-0.2 rounded border border-amber-200">
-                            Waktu Ditentukan Saat Pelaksanaan
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-amber-900 leading-relaxed mt-1">
-                          Program kerja ini disetujui namun belum memiliki bulan atau tanggal tertentu untuk pelaksanaannya.
-                          Waktu pelaksanaan nantinya akan ditentukan dan disepakati pada saat waktu pelaksanaan tiba.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-amber-200/80">
-                      <label className="block text-[11px] font-bold text-amber-950 mb-1">
-                        Keterangan Tambahan / Estimasi Pelaksanaan (Opsional):
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.tanggalSpesifik || ''}
-                        onChange={(e) => {
-                          setFormData((prev) => ({ ...prev, tanggalSpesifik: e.target.value }));
-                          setHasUnsavedChanges(true);
-                        }}
-                        placeholder="Contoh: Menunggu keputusan rapat pleno / perkiraan Semester II / menyesuaikan kalender paroki"
-                        className="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Sub-UI: Sepanjang Tahun */}
+                {/* Sub-UI: Pelayanan Rutin Sepanjang Tahun */}
                 {formData.tipeJadwal === 'sepanjang_tahun' && (
                   <div className="space-y-2.5">
-                    <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Kegiatan berlangsung kontinyu/rutin selama 12 bulan penuh (Januari – Desember).</span>
+                    <div className="p-2.5 bg-indigo-50/80 border border-indigo-200 rounded-xl text-xs text-indigo-950 flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span>Pelayanan berjalan rutin setiap bulan sepanjang tahun (Januari – Desember). Tanggal pelaksanaan harian/mingguan berkala menyesuaikan jadwal paroki.</span>
                     </div>
 
                     {/* Input Rencana Tanggal Tiap Bulan */}
@@ -1576,6 +1538,95 @@ export default function App() {
                 />
               </div>
 
+              {/* MENU EVALUASI PROGRAM KERJA */}
+              <div className="pt-2 border-t border-slate-200">
+                <div className="p-3.5 rounded-2xl bg-amber-50/90 border border-amber-300 space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                      <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-2xs font-bold text-xs mt-0.5">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="text-xs font-bold text-amber-950">
+                            Menu Evaluasi Program Kerja
+                          </h4>
+                          {formData.evaluasi?.statusKeterlaksanaan === 'terlaksana' ? (
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              ✓ Terlaksana
+                            </span>
+                          ) : formData.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana' ? (
+                            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                              ✕ Tidak Terlaksana
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-white text-amber-800 border border-amber-200">
+                              Belum Dievaluasi
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10.5px] text-amber-900 mt-0.5 leading-relaxed">
+                          Diisi oleh seksi bersangkutan untuk mencatat realisasi, tanggal, tempat, jumlah peserta, anggaran terpakai, dokumentasi, atau alasan tidak terlaksana.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (currentProgram) {
+                          setEvaluatingProgram({
+                            ...(formData as ProgramKerja),
+                            id: currentId,
+                          });
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-colors shrink-0 flex items-center gap-1 cursor-pointer active:scale-95"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>{formData.evaluasi?.statusKeterlaksanaan ? 'Edit Evaluasi' : 'Isi Evaluasi'}</span>
+                    </button>
+                  </div>
+
+                  {/* Ringkasan jika evaluasi sudah diisi */}
+                  {formData.evaluasi?.statusKeterlaksanaan && (
+                    <div className="p-2.5 rounded-xl bg-white border border-amber-200 text-[11px] text-slate-700 space-y-1">
+                      {formData.evaluasi.statusKeterlaksanaan === 'terlaksana' ? (
+                        <>
+                          <div className="flex items-center gap-2 flex-wrap text-emerald-900 font-bold">
+                            <span>🗓 Tgl: {formData.evaluasi.tanggalPelaksanaan || 'Sesuai jadwal'}</span>
+                            <span>•</span>
+                            <span>📍 Tempat: {formData.evaluasi.tempatPelaksanaan || 'Belum diisi'}</span>
+                            <span>•</span>
+                            <span>👥 Peserta: {formData.evaluasi.jumlahPeserta || '-'}</span>
+                          </div>
+                          {formData.evaluasi.anggaranTerpakai !== undefined && (
+                            <p className="text-slate-600">
+                              Anggaran Terpakai: <span className="font-extrabold text-emerald-800">{formatRupiah(formData.evaluasi.anggaranTerpakai)}</span> (dari estimasi {formatRupiah(formData.estimasiAnggaran || 0)})
+                            </p>
+                          )}
+                          {formData.evaluasi.penjelasanKegiatan && (
+                            <p className="text-slate-600 italic">
+                              "{formData.evaluasi.penjelasanKegiatan}"
+                            </p>
+                          )}
+                          {formData.evaluasi.dokumentasi && formData.evaluasi.dokumentasi.length > 0 && (
+                            <p className="text-[10px] text-indigo-700 font-bold">
+                              📎 {formData.evaluasi.dokumentasi.length} Lampiran dokumentasi diunggah
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-rose-900">
+                          <span className="font-bold">Alasan Tidak Terlaksana: </span>
+                          {formData.evaluasi.alasanTidakTerlaksana || 'Tidak ada alasan dicantumkan.'}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* ACTION BUTTONS (Simpan, Salin, Hapus) */}
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
@@ -1682,6 +1733,14 @@ export default function App() {
           canDelete={programs.length > 1}
           onClose={() => setIsDeleteModalOpen(false)}
           onConfirm={handleExecuteDelete}
+        />
+
+        {/* Modal Menu Evaluasi Program Kerja */}
+        <EvaluasiModal
+          isOpen={!!evaluatingProgram}
+          program={evaluatingProgram}
+          onClose={() => setEvaluatingProgram(null)}
+          onSaveEvaluasi={handleSaveEvaluasi}
         />
       </div>
     </div>

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { X, Search, Shield, Building2, Radio, Users, HeartHandshake, Home, Sparkles, GraduationCap, BookOpen, Music, BookKey, TreePine, Award, CheckCircle2 } from 'lucide-react';
 import { MASTER_DIVISIONS, MasterDivision, getDefaultPicForDivisi } from '../../database/master-data/divisions';
 import { ProgramKerja } from '../types/proker';
+import { normalizeDivisionName } from '../utils/formatters';
 
 interface SelectSeksiModalProps {
   isOpen: boolean;
@@ -36,7 +37,7 @@ export const SelectSeksiModal: React.FC<SelectSeksiModalProps> = ({
     const map: Record<string, number> = {};
     existingPrograms.forEach((p) => {
       if (p.tahun === selectedYear) {
-        const div = p.penanggungjawab?.divisi || 'Seksi Umum';
+        const div = normalizeDivisionName(p.penanggungjawab?.divisi || 'Seksi Umum');
         map[div] = (map[div] || 0) + 1;
       }
     });

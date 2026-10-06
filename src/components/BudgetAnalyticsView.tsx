@@ -10,7 +10,7 @@ import {
   Target,
 } from 'lucide-react';
 import { ProgramKerja } from '../types/proker';
-import { formatRupiah, formatCompactRupiah, getStatusInfo } from '../utils/formatters';
+import { formatRupiah, formatCompactRupiah, getStatusInfo, normalizeDivisionName } from '../utils/formatters';
 
 interface BudgetAnalyticsViewProps {
   programs: ProgramKerja[];
@@ -41,7 +41,7 @@ export const BudgetAnalyticsView: React.FC<BudgetAnalyticsViewProps> = ({ progra
   // Division Aggregates
   const divisiMap: Record<string, { count: number; total: number }> = {};
   programs.forEach((p) => {
-    const div = p.penanggungjawab?.divisi || 'Umum & Lainnya';
+    const div = normalizeDivisionName(p.penanggungjawab?.divisi || 'Umum & Lainnya');
     if (!divisiMap[div]) {
       divisiMap[div] = { count: 0, total: 0 };
     }

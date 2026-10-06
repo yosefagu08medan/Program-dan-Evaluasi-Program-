@@ -28,7 +28,7 @@ export const INITIAL_PROGRAM_KERJA: ProgramKerja[] = [
     },
     penanggungjawab: {
       nama: 'Yosef (Sekretaris 1) & Putut (Sekretaris 2)',
-      divisi: 'Sekretariat / DPPH',
+      divisi: 'DPPH (Dewan Pastoral Paroki Harian)',
       kontak: '',
     },
     status: 'berjalan',

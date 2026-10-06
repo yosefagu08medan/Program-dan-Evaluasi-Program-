@@ -1,4 +1,4 @@
-export type ScheduleType = 'sepanjang_tahun' | 'multi_bulan' | 'satu_kali' | 'tentatif';
+export type ScheduleType = 'sepanjang_tahun' | 'multi_bulan' | 'satu_kali';
 
 export type ProgramStatus = 'direncanakan' | 'berjalan' | 'selesai' | 'ditunda';
 
@@ -8,6 +8,30 @@ export interface PenanggungJawab {
   nama: string;
   divisi: string;
   kontak: string;
+}
+
+export interface DokumenLampiran {
+  id: string;
+  nama: string;
+  tipe: string; // 'application/pdf', 'image/jpeg', etc.
+  dataUrl?: string; // data URI atau URL file
+  ukuran?: string; // e.g. '2.4 MB'
+}
+
+export interface EvaluasiProgram {
+  statusKeterlaksanaan?: 'terlaksana' | 'tidak_terlaksana';
+  // Jika terlaksana (semua opsional):
+  tanggalPelaksanaan?: string;
+  tempatPelaksanaan?: string;
+  jumlahPeserta?: string;
+  penjelasanKegiatan?: string;
+  anggaranTerpakai?: number;
+  dokumentasi?: DokumenLampiran[];
+  // Jika tidak terlaksana:
+  alasanTidakTerlaksana?: string;
+  // Metadata pengisi:
+  tanggalEvaluasi?: string;
+  evaluator?: string;
 }
 
 export interface ProgramKerja {
@@ -24,6 +48,7 @@ export interface ProgramKerja {
   jadwalBulanan?: Record<number, string>; // Rencana tanggal pelaksanaan untuk tiap bulan (1-12)
   penanggungjawab: PenanggungJawab;
   status: ProgramStatus;
+  evaluasi?: EvaluasiProgram; // Menu & data evaluasi keterlaksanaan program kerja
   catatan?: string;
   createdAt: string;
   updatedAt: string;

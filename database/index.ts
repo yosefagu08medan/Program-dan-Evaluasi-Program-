@@ -5,6 +5,7 @@ import { MASTER_MENUS, MasterMenu } from './master-data/menus';
 import { SYSTEM_CONFIG, SystemConfig } from './master-data/systemConfig';
 import { SEED_PROGRAMS } from './seed/seedData';
 import { ProgramKerja } from '../src/types/proker';
+import { normalizeDivisionName } from '../src/utils/formatters';
 import {
   collection,
   doc,
@@ -141,6 +142,25 @@ class DatabaseService {
     if (!programs || programs.length === 0) {
       programs = SEED_PROGRAMS;
       this.writeStorage(TRANSACTION_PROGRAMS_KEY, programs);
+    } else {
+      let modified = false;
+      programs = programs.map((p) => {
+        const norm = normalizeDivisionName(p.penanggungjawab?.divisi);
+        if (p.penanggungjawab && p.penanggungjawab.divisi !== norm) {
+          modified = true;
+          return {
+            ...p,
+            penanggungjawab: {
+              ...p.penanggungjawab,
+              divisi: norm,
+            },
+          };
+        }
+        return p;
+      });
+      if (modified) {
+        this.writeStorage(TRANSACTION_PROGRAMS_KEY, programs);
+      }
     }
 
     return {
@@ -175,6 +195,9 @@ class DatabaseService {
             const cloudPrograms: ProgramKerja[] = [];
             snapshot.forEach((docSnap) => {
               const data = docSnap.data() as ProgramKerja;
+              if (data.penanggungjawab) {
+                data.penanggungjawab.divisi = normalizeDivisionName(data.penanggungjawab.divisi);
+              }
               cloudPrograms.push(data);
             });
 

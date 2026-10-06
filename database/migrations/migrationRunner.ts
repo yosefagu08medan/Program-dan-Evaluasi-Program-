@@ -1,6 +1,7 @@
 import { migration001, MigrationContext } from './001_initial_schema_and_master';
 import { migration002 } from './002_add_master_dpl_and_menu';
 import { migration003 } from './003_update_official_parish_sections';
+import { migration004 } from './004_normalize_dpph_and_all_divisions';
 
 export interface Migration {
   id: string;
@@ -13,6 +14,7 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration001,
   migration002,
   migration003,
+  migration004,
 ];
 
 export const MIGRATION_STORAGE_KEY = 'proker_db_executed_migrations';

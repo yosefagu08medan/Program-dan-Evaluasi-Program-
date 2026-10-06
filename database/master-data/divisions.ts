@@ -13,10 +13,10 @@ export const MASTER_DIVISIONS: MasterDivision[] = [
   {
     id: 'div-dpph',
     code: 'DPPH',
-    nama: 'DPPH (Dewan Pengurus Paroki Harian)',
+    nama: 'DPPH (Dewan Pastoral Paroki Harian)',
     defaultPic: 'Sekretariat DPPH',
     kategori: 'DPPH',
-    deskripsi: 'Dewan Pengurus Paroki Harian, koordinasi pastoral umum & kebijakan paroki',
+    deskripsi: 'Dewan Pastoral Paroki Harian, koordinasi pastoral umum & kebijakan paroki',
     urutan: 1,
     isActive: true,
   },

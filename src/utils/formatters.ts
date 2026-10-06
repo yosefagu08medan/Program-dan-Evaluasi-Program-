@@ -18,6 +18,59 @@ export const BULAN_LIST = [
 
 export const DAFTAR_DIVISI: string[] = MASTER_DIVISIONS.map((d) => d.nama);
 
+export const OFFICIAL_DPPH_NAME = 'DPPH (Dewan Pastoral Paroki Harian)';
+
+/**
+ * Normalisasi nama divisi untuk mengatasi variasi penamaan seperti
+ * 'Sekretariat / DPPH', 'DPPH', 'DPPH (Dewan Pengurus Paroki Harian)'
+ */
+export function normalizeDivisionName(divisi: string | undefined): string {
+  if (!divisi) return 'Seksi Umum';
+  const dLower = divisi.toLowerCase();
+  if (
+    dLower.includes('dpph') ||
+    dLower.includes('dewan pastoral') ||
+    dLower.includes('dewan paroki') ||
+    dLower.includes('dewan pengurus') ||
+    dLower.includes('sekretariat / dpph') ||
+    dLower === 'sekretariat'
+  ) {
+    return OFFICIAL_DPPH_NAME;
+  }
+
+  // Cari di daftar MASTER_DIVISIONS
+  const found = MASTER_DIVISIONS.find((m) => m.nama.toLowerCase() === dLower);
+  if (found) return found.nama;
+
+  // Pencocokan seksi
+  if (dLower.includes('liturgi')) return 'Seksi Liturgi';
+  if (dLower.includes('katekese')) return 'Seksi Katekese';
+  if (dLower.includes('komsos')) return 'Seksi Komsos';
+  if (dLower.includes('keamanan')) return 'Seksi Keamanan';
+  if (dLower.includes('pse') || dLower.includes('kemasyarakatan')) return 'Seksi PSE';
+  if (dLower.includes('kepemudaan') || dLower.includes('omk')) return 'Seksi Kepemudaan';
+  if (dLower.includes('keluarga')) return 'Seksi Kerasulan Keluarga';
+  if (dLower.includes('pendidikan')) return 'Seksi Pendidikan';
+  if (dLower.includes('kki') || dLower.includes('karya kepausan')) return 'Seksi KKI';
+  if (dLower.includes('evangelisasi')) return 'Seksi Evangelisasi';
+  if (dLower.includes('kks') || dLower.includes('kitab suci')) return 'Seksi KKS';
+  if (dLower.includes('plbks') || dLower.includes('lingkungan')) return 'Seksi PLBKS';
+  if (dLower.includes('kerawam') || dLower.includes('awam')) return 'Seksi Kerasulan Awam';
+  if (dLower.includes('hak') || dLower.includes('kepercayaan')) return 'Seksi HAK';
+  if (dLower.includes('umum') || dLower.includes('sarana') || dLower.includes('rumah tangga')) return 'Seksi Umum';
+
+  return divisi;
+}
+
+/**
+ * Mencocokkan divisi program dengan filter atau master division
+ */
+export function isDivisionMatch(progDivisi: string | undefined, targetDivisi: string): boolean {
+  if (!targetDivisi || targetDivisi === 'all') return true;
+  if (!progDivisi) return false;
+  return normalizeDivisionName(progDivisi) === normalizeDivisionName(targetDivisi);
+}
+
 export function formatRupiah(amount: number): string {
   if (isNaN(amount) || amount === null || amount === undefined) return 'Rp 0';
   return new Intl.NumberFormat('id-ID', {
@@ -125,10 +178,8 @@ export function generateJadwalBulanan(
 
 export function getTipeJadwalLabel(type: ScheduleType): string {
   switch (type) {
-    case 'tentatif':
-      return 'Tentatif (Belum Ditentukan Waktunya)';
     case 'sepanjang_tahun':
-      return 'Sepanjang Tahun';
+      return 'Pelayanan Rutin (Sepanjang Tahun)';
     case 'multi_bulan':
       return 'Multi Bulan';
     case 'satu_kali':
@@ -138,11 +189,56 @@ export function getTipeJadwalLabel(type: ScheduleType): string {
   }
 }
 
-export function isTentatifProgram(p: ProgramKerja): boolean {
-  if (p.tipeJadwal === 'tentatif') return true;
-  if (!p.bulanPelaksanaan || p.bulanPelaksanaan.length === 0) return true;
+/**
+ * Deteksi apakah program merupakan Rapat Dewan Pastoral Paroki Harian (DPPH).
+ * Rapat DPPH memiliki jadwal pelaksanaan yang sudah ditentukan pasti setiap bulannya
+ * dan ditampilkan di Dashboard secara khusus (bukan program rutin).
+ */
+export function isRapatDPPH(p: ProgramKerja): boolean {
+  const nama = (p.namaProgram || '').toLowerCase();
+  const div = (p.penanggungjawab?.divisi || '').toLowerCase();
+  return (
+    nama.includes('rapat dpph') ||
+    nama.includes('rapat rutin dpph') ||
+    nama.includes('rapat dewan pastoral') ||
+    nama.includes('rapat rutin dewan pastoral') ||
+    nama.includes('rapat rutin dewan paroki') ||
+    (div.includes('dpph') && nama.includes('rapat'))
+  );
+}
+
+/**
+ * Deteksi apakah program merupakan "Pelayanan Rutin":
+ * Program yang berjalan rutin setiap bulan sepanjang tahun.
+ * 
+ * ATURAN KHUSUS SESUAI INSTRUKSI:
+ * - Rapat DPPH BUKAN masuk program rutin (memiliki kartu/dashboard khusus).
+ * - JIKA ADA PROGRAM DPPH LAIN YANG DILAKSANAKAN SETIAP BULAN SELAIN RAPAT DPPH,
+ *   MAKA ITU MASUK KE PROGRAM RUTIN.
+ */
+export function isPelayananRutin(p: ProgramKerja): boolean {
+  // 1. Rapat DPPH secara eksplisit BUKAN pelayanan rutin
+  if (isRapatDPPH(p)) {
+    return false;
+  }
+
+  // 2. Jika program berjalan sepanjang tahun (12 bulan)
+  // Termasuk program DPPH selain Rapat DPPH dan seluruh seksi lainnya
+  if (p.tipeJadwal === 'sepanjang_tahun' || (p.bulanPelaksanaan && p.bulanPelaksanaan.length >= 12)) {
+    return true;
+  }
+
   const tgl = (p.tanggalSpesifik || '').toLowerCase();
-  if (tgl.includes('tentatif') || tgl.includes('akan ditentukan')) return true;
+  if (
+    tgl.includes('setiap bulan') ||
+    tgl.includes('tiap bulan') ||
+    tgl.includes('rutin') ||
+    tgl.includes('pelayanan rutin') ||
+    tgl.includes('berkala')
+  ) {
+    return true;
+  }
+
   return false;
 }
 

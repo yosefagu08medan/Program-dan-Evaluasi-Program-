@@ -4,10 +4,10 @@ export const SEED_PROGRAMS: ProgramKerja[] = [
   {
     id: 'proker-dpph-01',
     tahun: 2026,
-    namaProgram: 'Rapat Rutin Dewan Paroki Harian (DPPH)',
+    namaProgram: 'Rapat Rutin Dewan Pastoral Paroki Harian (DPPH)',
     tujuanKegiatan:
       'Evaluasi pelaksanaan program pastoral bulanan, koordinasi antar-seksi, pengelolaan pastoral paroki, dan pengambilan keputusan strategis Paroki Katedral Medan.',
-    targetSasaran: 'Pastor Paroki, Pastor Rekan, dan Seluruh Anggota Dewan Pengurus Paroki Harian (DPPH)',
+    targetSasaran: 'Pastor Paroki, Pastor Rekan, dan Seluruh Anggota Dewan Pastoral Paroki Harian (DPPH)',
     estimasiAnggaran: 12000000,
     tipeJadwal: 'sepanjang_tahun',
     bulanPelaksanaan: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
@@ -29,7 +29,7 @@ export const SEED_PROGRAMS: ProgramKerja[] = [
     },
     penanggungjawab: {
       nama: 'Sekretariat DPPH Katedral',
-      divisi: 'DPPH (Dewan Pengurus Paroki Harian)',
+      divisi: 'DPPH (Dewan Pastoral Paroki Harian)',
       kontak: '081260011223',
     },
     status: 'berjalan',
