@@ -5,6 +5,9 @@ import { MASTER_MENUS, MasterMenu } from './master-data/menus';
 import { SYSTEM_CONFIG, SystemConfig } from './master-data/systemConfig';
 import { SEED_PROGRAMS } from './seed/seedData';
 import { ProgramKerja } from '../src/types/proker';
+import { PengurusItem, MasterJabatan } from '../src/types/pengurus';
+import { INITIAL_PENGURUS_PAROKI } from '../src/data/initialPengurus';
+import { INITIAL_MASTER_JABATAN } from '../src/data/initialJabatan';
 import { normalizeDivisionName } from '../src/utils/formatters';
 import {
   collection,
@@ -18,6 +21,8 @@ import { db, handleFirestoreError, OperationType, testConnection } from '../src/
 
 export const TRANSACTION_PROGRAMS_KEY = SYSTEM_CONFIG.storageKey;
 export const META_STORAGE_KEY = 'proker_db_metadata';
+export const PENGURUS_STORAGE_KEY = 'proker_db_pengurus';
+export const JABATAN_STORAGE_KEY = 'proker_db_master_jabatan';
 
 export interface DatabaseMetadata {
   masterDivisions: MasterDivision[];
@@ -46,7 +51,11 @@ class DatabaseService {
   private runner: MigrationRunner;
   private isInitialized = false;
   private listeners: Set<(programs: ProgramKerja[]) => void> = new Set();
+  private pengurusListeners: Set<(pengurus: PengurusItem[]) => void> = new Set();
+  private jabatanListeners: Set<(jabatanList: MasterJabatan[]) => void> = new Set();
   private unsubscribeFirestore: (() => void) | null = null;
+  private unsubscribeFirestorePengurus: (() => void) | null = null;
+  private unsubscribeFirestoreJabatan: (() => void) | null = null;
   private isConnectedToCloud = false;
 
   constructor() {
@@ -134,6 +143,8 @@ class DatabaseService {
       // Start Firebase Firestore real-time listener if in browser
       if (typeof window !== 'undefined') {
         this.setupFirestoreSync();
+        this.setupFirestorePengurusSync();
+        this.setupFirestoreJabatanSync();
       }
     }
 
@@ -302,6 +313,263 @@ class DatabaseService {
       return true;
     }
     return false;
+  }
+
+  // --- 4B. PENGURUS PAROKI (Pastor Paroki, Vikaris, DPPH, Koordinator Seksi & Anggotanya) ---
+  private notifyPengurusSubscribers(pengurus: PengurusItem[]): void {
+    this.pengurusListeners.forEach((listener) => {
+      try {
+        listener(pengurus);
+      } catch (err) {
+        console.error('Error in pengurus subscriber callback:', err);
+      }
+    });
+  }
+
+  public subscribePengurus(listener: (pengurus: PengurusItem[]) => void): () => void {
+    this.pengurusListeners.add(listener);
+    listener(this.getPengurus());
+    return () => {
+      this.pengurusListeners.delete(listener);
+    };
+  }
+
+  public getPengurus(): PengurusItem[] {
+    const list = this.readStorage<PengurusItem[]>(PENGURUS_STORAGE_KEY, []);
+    if (!list || list.length === 0) {
+      return INITIAL_PENGURUS_PAROKI;
+    }
+    return list;
+  }
+
+  public getPengurusById(id: string): PengurusItem | undefined {
+    return this.getPengurus().find((p) => p.id === id);
+  }
+
+  public async savePengurus(item: PengurusItem): Promise<PengurusItem> {
+    const list = this.getPengurus();
+    const existingIndex = list.findIndex((p) => p.id === item.id);
+    const now = new Date().toISOString();
+
+    const itemToSave: PengurusItem = {
+      ...item,
+      updatedAt: now,
+      createdAt: item.createdAt || now,
+    };
+
+    let updatedList: PengurusItem[];
+    if (existingIndex >= 0) {
+      updatedList = [...list];
+      updatedList[existingIndex] = itemToSave;
+    } else {
+      updatedList = [...list, itemToSave];
+    }
+
+    updatedList.sort((a, b) => (a.urutan || 99) - (b.urutan || 99));
+
+    // 1. Update local cache immediately
+    this.writeStorage(PENGURUS_STORAGE_KEY, updatedList);
+    this.notifyPengurusSubscribers(updatedList);
+
+    // 2. Persist to Cloud Firestore
+    try {
+      const docRef = doc(db, 'pengurus', itemToSave.id);
+      await setDoc(docRef, sanitizeForFirestore(itemToSave));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `pengurus/${itemToSave.id}`);
+    }
+
+    return itemToSave;
+  }
+
+  public async saveAllPengurus(items: PengurusItem[]): Promise<void> {
+    items.sort((a, b) => (a.urutan || 99) - (b.urutan || 99));
+    this.writeStorage(PENGURUS_STORAGE_KEY, items);
+    this.notifyPengurusSubscribers(items);
+    await this.pushAllPengurusToFirestore(items);
+  }
+
+  public async deletePengurus(id: string): Promise<boolean> {
+    const list = this.getPengurus();
+    const filtered = list.filter((p) => p.id !== id);
+    if (filtered.length !== list.length) {
+      this.writeStorage(PENGURUS_STORAGE_KEY, filtered);
+      this.notifyPengurusSubscribers(filtered);
+
+      try {
+        const docRef = doc(db, 'pengurus', id);
+        await deleteDoc(docRef);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, `pengurus/${id}`);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  private async setupFirestorePengurusSync(): Promise<void> {
+    try {
+      const pengurusCol = collection(db, 'pengurus');
+      this.unsubscribeFirestorePengurus = onSnapshot(
+        pengurusCol,
+        (snapshot) => {
+          if (snapshot.empty) {
+            console.info('[Firebase] Firestore pengurus collection is empty. Seeding initial pengurus...');
+            const localPengurus = this.getPengurus();
+            const toSeed = localPengurus.length > 0 ? localPengurus : INITIAL_PENGURUS_PAROKI;
+            this.pushAllPengurusToFirestore(toSeed);
+          } else {
+            const cloudPengurus: PengurusItem[] = [];
+            snapshot.forEach((docSnap) => {
+              cloudPengurus.push(docSnap.data() as PengurusItem);
+            });
+            cloudPengurus.sort((a, b) => (a.urutan || 99) - (b.urutan || 99));
+            this.writeStorage(PENGURUS_STORAGE_KEY, cloudPengurus);
+            this.notifyPengurusSubscribers(cloudPengurus);
+            console.info(`[Firebase] Synced ${cloudPengurus.length} pengurus from Cloud Firestore.`);
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'pengurus');
+        }
+      );
+    } catch (err) {
+      console.warn('[Firebase] Could not initialize Firestore pengurus sync:', err);
+    }
+  }
+
+  private async pushAllPengurusToFirestore(items: PengurusItem[]): Promise<void> {
+    try {
+      const batch = writeBatch(db);
+      items.forEach((item) => {
+        const docRef = doc(db, 'pengurus', item.id);
+        batch.set(docRef, sanitizeForFirestore(item));
+      });
+      await batch.commit();
+      console.info(`[Firebase] Initialized ${items.length} pengurus in Cloud Firestore.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'pengurus');
+    }
+  }
+
+  // 4B. Master Jabatan Pengurus Methods
+  public getMasterJabatan(): MasterJabatan[] {
+    const cached = this.readStorage<MasterJabatan[]>(JABATAN_STORAGE_KEY, []);
+    if (!cached || cached.length === 0) {
+      this.writeStorage(JABATAN_STORAGE_KEY, INITIAL_MASTER_JABATAN);
+      return INITIAL_MASTER_JABATAN;
+    }
+    return cached;
+  }
+
+  public subscribeMasterJabatan(listener: (jabatanList: MasterJabatan[]) => void): () => void {
+    this.jabatanListeners.add(listener);
+    listener(this.getMasterJabatan());
+    return () => {
+      this.jabatanListeners.delete(listener);
+    };
+  }
+
+  private notifyJabatanSubscribers(jabatanList: MasterJabatan[]): void {
+    this.jabatanListeners.forEach((listener) => {
+      try {
+        listener(jabatanList);
+      } catch (err) {
+        console.error('Error in jabatan subscriber callback:', err);
+      }
+    });
+  }
+
+  public async saveMasterJabatan(item: MasterJabatan): Promise<MasterJabatan> {
+    const list = this.getMasterJabatan();
+    const existingIndex = list.findIndex((j) => j.id === item.id);
+    let updated: MasterJabatan[];
+    if (existingIndex >= 0) {
+      updated = [...list];
+      updated[existingIndex] = item;
+    } else {
+      updated = [...list, item];
+    }
+    updated.sort((a, b) => (a.urutan || 99) - (b.urutan || 99));
+    this.writeStorage(JABATAN_STORAGE_KEY, updated);
+    this.notifyJabatanSubscribers(updated);
+
+    try {
+      const docRef = doc(db, 'master_jabatan', item.id);
+      await setDoc(docRef, sanitizeForFirestore(item));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `master_jabatan/${item.id}`);
+    }
+    return item;
+  }
+
+  public async deleteMasterJabatan(id: string): Promise<boolean> {
+    const list = this.getMasterJabatan();
+    const filtered = list.filter((j) => j.id !== id);
+    if (filtered.length !== list.length) {
+      this.writeStorage(JABATAN_STORAGE_KEY, filtered);
+      this.notifyJabatanSubscribers(filtered);
+
+      try {
+        const docRef = doc(db, 'master_jabatan', id);
+        await deleteDoc(docRef);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, `master_jabatan/${id}`);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  public async resetMasterJabatan(): Promise<void> {
+    this.writeStorage(JABATAN_STORAGE_KEY, INITIAL_MASTER_JABATAN);
+    this.notifyJabatanSubscribers(INITIAL_MASTER_JABATAN);
+    try {
+      const batch = writeBatch(db);
+      INITIAL_MASTER_JABATAN.forEach((item) => {
+        const docRef = doc(db, 'master_jabatan', item.id);
+        batch.set(docRef, sanitizeForFirestore(item));
+      });
+      await batch.commit();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'master_jabatan');
+    }
+  }
+
+  private async setupFirestoreJabatanSync(): Promise<void> {
+    try {
+      const jabatanCol = collection(db, 'master_jabatan');
+      this.unsubscribeFirestoreJabatan = onSnapshot(
+        jabatanCol,
+        (snapshot) => {
+          if (snapshot.empty) {
+            console.info('[Firebase] Firestore master_jabatan collection is empty. Seeding initial positions...');
+            const local = this.getMasterJabatan();
+            const toSeed = local.length > 0 ? local : INITIAL_MASTER_JABATAN;
+            const batch = writeBatch(db);
+            toSeed.forEach((item) => {
+              const docRef = doc(db, 'master_jabatan', item.id);
+              batch.set(docRef, sanitizeForFirestore(item));
+            });
+            batch.commit().catch(console.error);
+          } else {
+            const cloudList: MasterJabatan[] = [];
+            snapshot.forEach((docSnap) => {
+              cloudList.push(docSnap.data() as MasterJabatan);
+            });
+            cloudList.sort((a, b) => (a.urutan || 99) - (b.urutan || 99));
+            this.writeStorage(JABATAN_STORAGE_KEY, cloudList);
+            this.notifyJabatanSubscribers(cloudList);
+            console.info(`[Firebase] Synced ${cloudList.length} master_jabatan from Cloud Firestore.`);
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'master_jabatan');
+        }
+      );
+    } catch (err) {
+      console.warn('[Firebase] Could not initialize Firestore master_jabatan sync:', err);
+    }
   }
 
   // 5. Master Data Getters (Version Controlled)

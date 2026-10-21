@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   CheckCircle2,
@@ -11,28 +11,42 @@ import {
   Upload,
   File,
   Trash2,
-  ExternalLink,
   Save,
   AlertCircle,
-  Building2,
-  Eye,
+  TrendingDown,
+  Info,
 } from 'lucide-react';
 import { ProgramKerja, EvaluasiProgram, DokumenLampiran, StatusKeterlaksanaan } from '../types/proker';
-import { formatRupiah, parseRupiahInput } from '../utils/formatters';
+import {
+  formatRupiah,
+  parseRupiahInput,
+  BULAN_LIST,
+  isProgramBerulang,
+  getEvaluasiForMonth,
+  getAnggaranTerpakaiSebelumBulan,
+  getSisaBudgetUntukBulan,
+} from '../utils/formatters';
 
 interface EvaluasiModalProps {
   isOpen: boolean;
   program: ProgramKerja | null;
+  selectedMonth?: number; // Bulan konteks yang sedang aktif (1-12)
   onClose: () => void;
-  onSaveEvaluasi: (programId: string, evaluasiData: EvaluasiProgram) => void;
+  onSaveEvaluasi: (programId: string, evaluasiData: EvaluasiProgram, targetBulan?: number) => void;
 }
 
 export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
   isOpen,
   program,
+  selectedMonth = 10,
   onClose,
   onSaveEvaluasi,
 }) => {
+  // Bulan aktif untuk evaluasi
+  const [activeBulan, setActiveBulan] = useState<number>(() => {
+    return selectedMonth && selectedMonth >= 1 && selectedMonth <= 12 ? selectedMonth : 10;
+  });
+
   const [statusKeterlaksanaan, setStatusKeterlaksanaan] = useState<StatusKeterlaksanaan>('terlaksana');
   const [tanggalPelaksanaan, setTanggalPelaksanaan] = useState<string>('');
   const [tempatPelaksanaan, setTempatPelaksanaan] = useState<string>('');
@@ -47,10 +61,48 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
   const [penjelasanPerubahan, setPenjelasanPerubahan] = useState<string>('');
   const [evaluator, setEvaluator] = useState<string>('');
 
-  // Sinkronisasi data saat modal dibuka
+  const isBerulang = useMemo(() => {
+    return program ? isProgramBerulang(program) : false;
+  }, [program]);
+
+  // Daftar bulan yang berlaku untuk program ini
+  const availableMonths = useMemo(() => {
+    if (!program) return [];
+    if (program.tipeJadwal === 'sepanjang_tahun' || (program.bulanPelaksanaan && program.bulanPelaksanaan.length >= 12)) {
+      return BULAN_LIST;
+    }
+    if (Array.isArray(program.bulanPelaksanaan) && program.bulanPelaksanaan.length > 0) {
+      return BULAN_LIST.filter((b) => program.bulanPelaksanaan.includes(b.no));
+    }
+    return BULAN_LIST;
+  }, [program]);
+
+  // Saat modal terbuka, sinkronisasi bulan awal
+  useEffect(() => {
+    if (isOpen && program) {
+      const initialMo =
+        selectedMonth && availableMonths.some((b) => b.no === selectedMonth)
+          ? selectedMonth
+          : availableMonths[0]?.no || 10;
+      setActiveBulan(initialMo);
+    }
+  }, [isOpen, program, selectedMonth, availableMonths]);
+
+  // Hitung sisa budget dan anggaran terpakai sebelum bulan ini
+  const terpakaiSebelumnya = useMemo(() => {
+    if (!program) return 0;
+    return getAnggaranTerpakaiSebelumBulan(program, activeBulan);
+  }, [program, activeBulan]);
+
+  const sisaBudgetBulanIni = useMemo(() => {
+    if (!program) return 0;
+    return getSisaBudgetUntukBulan(program, activeBulan);
+  }, [program, activeBulan]);
+
+  // Muat data evaluasi untuk bulan aktif
   useEffect(() => {
     if (program) {
-      const prev = program.evaluasi;
+      const prev = isBerulang ? getEvaluasiForMonth(program, activeBulan) : program.evaluasi;
       if (prev) {
         setStatusKeterlaksanaan(prev.statusKeterlaksanaan || 'terlaksana');
         setTanggalPelaksanaan(prev.tanggalPelaksanaan || '');
@@ -58,7 +110,7 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
         setJumlahPeserta(prev.jumlahPeserta || '');
         setPenjelasanKegiatan(prev.penjelasanKegiatan || '');
         setAnggaranTerpakai(prev.anggaranTerpakai || 0);
-        setRawAnggaran(prev.anggaranTerpakai ? prev.anggaranTerpakai.toLocaleString('id-ID') : '');
+        setRawAnggaran(prev.anggaranTerpakai !== undefined ? prev.anggaranTerpakai.toLocaleString('id-ID') : '');
         setDokumentasi(prev.dokumentasi || []);
         setAlasanTidakTerlaksana(prev.alasanTidakTerlaksana || '');
         setJadwalBaru(prev.jadwalBaru || '');
@@ -66,18 +118,18 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
         setPenjelasanPerubahan(prev.penjelasanPerubahan || '');
         setEvaluator(prev.evaluator || program.penanggungjawab?.nama || '');
       } else {
-        // Default kosong / baru
+        // Default kosong untuk bulan ini
         setStatusKeterlaksanaan('terlaksana');
-        setTanggalPelaksanaan(
-          (program.jadwalBulanan && Object.values(program.jadwalBulanan)[0]) ||
+        const defaultDate =
+          program.jadwalBulanan?.[activeBulan] ||
           (program.tanggalSpesifik?.match(/\d{4}-\d{2}-\d{2}/)?.[0]) ||
-          ''
-        );
+          '';
+        setTanggalPelaksanaan(defaultDate);
         setTempatPelaksanaan('');
         setJumlahPeserta('');
         setPenjelasanKegiatan('');
-        setAnggaranTerpakai(program.estimasiAnggaran || 0);
-        setRawAnggaran(program.estimasiAnggaran ? program.estimasiAnggaran.toLocaleString('id-ID') : '');
+        setAnggaranTerpakai(0);
+        setRawAnggaran('');
         setDokumentasi([]);
         setAlasanTidakTerlaksana('');
         setJadwalBaru('');
@@ -86,7 +138,7 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
         setEvaluator(program.penanggungjawab?.nama || '');
       }
     }
-  }, [program, isOpen]);
+  }, [program, activeBulan, isBerulang]);
 
   if (!isOpen || !program) return null;
 
@@ -96,7 +148,7 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
     setRawAnggaran(num ? num.toLocaleString('id-ID') : '');
   };
 
-  // Upload file dokumentasi (PDF, JPEG, PNG, etc.)
+  // Upload file dokumentasi
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -155,9 +207,11 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
           }),
     };
 
-    onSaveEvaluasi(program.id, evaluasiData);
+    onSaveEvaluasi(program.id, evaluasiData, isBerulang ? activeBulan : undefined);
     onClose();
   };
+
+  const activeBulanObj = BULAN_LIST.find((b) => b.no === activeBulan);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
@@ -167,7 +221,7 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
           <div className="min-w-0 flex-1 pr-2">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                📝 Form Evaluasi
+                📝 Form Evaluasi Bulanan
               </span>
               <span className="text-xs text-slate-300 font-semibold truncate">
                 {program.penanggungjawab?.divisi}
@@ -189,10 +243,76 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
 
         {/* Form Body Scrollable */}
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+          {/* PILIHAN BULAN EVALUASI JIKA PROGRAM BERULANG / SETIAP BULAN */}
+          {isBerulang && (
+            <div className="p-3 bg-indigo-50/80 rounded-xl border border-indigo-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Pilih Bulan Evaluasi Pelaksanaan:</span>
+                </label>
+                <span className="text-[10px] font-extrabold text-indigo-700 bg-white px-2 py-0.5 rounded-full border border-indigo-200">
+                  Tahun {program.tahun}
+                </span>
+              </div>
+
+              {/* Pill selector bulan */}
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5">
+                {availableMonths.map((b) => {
+                  const ev = program.evaluasiBulanan?.[b.no];
+                  const hasDone = ev?.statusKeterlaksanaan === 'terlaksana';
+                  const hasBatal = ev?.statusKeterlaksanaan === 'tidak_terlaksana';
+                  const hasGeser = ev?.statusKeterlaksanaan === 'perubahan_waktu';
+                  const isCurrent = b.no === activeBulan;
+
+                  return (
+                    <button
+                      key={b.no}
+                      type="button"
+                      onClick={() => setActiveBulan(b.no)}
+                      className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all relative flex flex-col items-center cursor-pointer ${
+                        isCurrent
+                          ? 'bg-indigo-600 text-white ring-2 ring-indigo-600/30 shadow-2xs'
+                          : 'bg-white text-slate-700 border border-slate-200 hover:bg-indigo-100/50'
+                      }`}
+                    >
+                      <span>{b.singkatan}</span>
+                      <span className="text-[9px] mt-0.5 font-medium">
+                        {hasDone ? '✓ Selesai' : hasBatal ? '✕ Batal' : hasGeser ? '⏳ Geser' : '—'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Status Ringkasan Budget Program Rutin / Berulang */}
+              <div className="mt-2 pt-2 border-t border-indigo-200/80 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                <div className="bg-white p-2 rounded-lg border border-indigo-100">
+                  <span className="text-[10px] text-slate-500 block font-semibold">Total Pagu Tahunan</span>
+                  <strong className="text-slate-900 font-extrabold">{formatRupiah(program.estimasiAnggaran)}</strong>
+                </div>
+
+                <div className="bg-white p-2 rounded-lg border border-indigo-100">
+                  <span className="text-[10px] text-slate-500 block font-semibold">Terpakai s/d Bulan Lalu</span>
+                  <strong className="text-rose-700 font-extrabold">
+                    {terpakaiSebelumnya > 0 ? `-${formatRupiah(terpakaiSebelumnya)}` : 'Rp 0'}
+                  </strong>
+                </div>
+
+                <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                  <span className="text-[10px] text-emerald-800 block font-bold">
+                    Sisa Budget Bulan {activeBulanObj?.nama}
+                  </span>
+                  <strong className="text-emerald-950 font-extrabold">{formatRupiah(sisaBudgetBulanIni)}</strong>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 1. Pilihan Status Keterlaksanaan Program: 3 Pilihan */}
           <div>
             <label className="block text-xs font-bold text-slate-800 mb-1.5">
-              1. Pilihan Status Evaluasi Pelaksanaan:
+              1. Status Evaluasi Pelaksanaan Bulan {activeBulanObj?.nama}:
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
@@ -269,12 +389,14 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
             </div>
           </div>
 
-          {/* 2A. FORM JIKA PROGRAM TERLAKSANA (Semua bersifat opsional) */}
+          {/* 2A. FORM JIKA PROGRAM TERLAKSANA */}
           {statusKeterlaksanaan === 'terlaksana' && (
             <div className="space-y-3.5 pt-2 border-t border-slate-100 animate-in fade-in">
               <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl text-[11px] text-emerald-900 flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Seluruh kolom evaluasi di bawah ini bersifat fleksibel & opsional (tidak wajib).</span>
+                <span>
+                  Evaluasi untuk pelaksanaan di bulan <strong>{activeBulanObj?.nama} {program.tahun}</strong>.
+                </span>
               </div>
 
               {/* Tanggal Pelaksanaan & Tempat Pelaksanaan */}
@@ -282,7 +404,7 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                 <div>
                   <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center gap-1">
                     <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Tanggal Pelaksanaan:</span>
+                    <span>Tanggal Realisasi Pelaksanaan:</span>
                   </label>
                   <input
                     type="date"
@@ -312,13 +434,13 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                 <div>
                   <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center gap-1">
                     <Users className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Jumlah Peserta:</span>
+                    <span>Jumlah Peserta / Kehadiran:</span>
                   </label>
                   <input
                     type="text"
                     value={jumlahPeserta}
                     onChange={(e) => setJumlahPeserta(e.target.value)}
-                    placeholder="Contoh: 150 orang / 35 panitia"
+                    placeholder="Contoh: 15 anggota DPPH / 120 umat"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                   />
                 </div>
@@ -327,11 +449,17 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-bold text-slate-800 flex items-center gap-1">
                       <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Jumlah Anggaran Terpakai:</span>
+                      <span>Biaya / Anggaran Terpakai:</span>
                     </label>
-                    <span className="text-[10px] text-slate-500 font-semibold">
-                      Est: {formatRupiah(program.estimasiAnggaran)}
-                    </span>
+                    {isBerulang ? (
+                      <span className="text-[10px] text-emerald-800 font-bold">
+                        Sisa: {formatRupiah(sisaBudgetBulanIni)}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-500 font-semibold">
+                        Pagu: {formatRupiah(program.estimasiAnggaran)}
+                      </span>
+                    )}
                   </div>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
@@ -345,6 +473,26 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs font-bold text-slate-900 tabular-nums focus:outline-none focus:border-emerald-500 focus:bg-white"
                     />
                   </div>
+
+                  {/* Informasi Simulasi Pengurangan Anggaran */}
+                  {isBerulang && (
+                    <div className="mt-1.5 p-2 rounded-lg bg-amber-50/80 border border-amber-200 text-[10px] text-amber-900 flex items-start gap-1.5">
+                      <TrendingDown className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+                      <div>
+                        <span>
+                          Biaya bulan {activeBulanObj?.nama} sebesar{' '}
+                          <strong>{formatRupiah(anggaranTerpakai || 0)}</strong> akan mengurangi sisa pagu
+                          keseluruhan.
+                        </span>
+                        <div className="mt-0.5 font-bold text-slate-700">
+                          Sisa untuk bulan berikutnya:{' '}
+                          <span className="text-emerald-800">
+                            {formatRupiah(Math.max(0, sisaBudgetBulanIni - (anggaranTerpakai || 0)))}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -352,13 +500,13 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center gap-1">
                   <FileText className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Penjelasan Singkat Kegiatan yang Dilakukan:</span>
+                  <span>Uraian Ringkas Hasil Kegiatan / Rapat Bulan Ini:</span>
                 </label>
                 <textarea
                   rows={3}
                   value={penjelasanKegiatan}
                   onChange={(e) => setPenjelasanKegiatan(e.target.value)}
-                  placeholder="Uraikan jalannya kegiatan, output yang dicapai, atau catatan penting pelaksanaan..."
+                  placeholder="Uraikan jalannya kegiatan, keputusan rapat, notulensi, atau output yang dicapai..."
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                 />
               </div>
@@ -368,19 +516,18 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-bold text-slate-800 flex items-center gap-1">
                     <Upload className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Dokumentasi Kegiatan (PDF, JPEG, PNG, dll.):</span>
+                    <span>Dokumentasi & Lampiran (Foto/PDF/Notulensi):</span>
                   </label>
                   <span className="text-[10px] text-slate-400 font-medium">Opsional</span>
                 </div>
 
-                {/* Box Upload */}
                 <label className="border-2 border-dashed border-slate-300 hover:border-emerald-400 bg-slate-50 hover:bg-emerald-50/40 rounded-xl p-3.5 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors text-center">
                   <Upload className="w-5 h-5 text-slate-400" />
                   <span className="text-xs font-bold text-slate-700">
                     Klik untuk Unggah Foto / Dokumen PDF
                   </span>
                   <span className="text-[10px] text-slate-400">
-                    Mendukung file JPEG, PNG, PDF, atau dokumen lampiran
+                    Mendukung file JPEG, PNG, PDF, atau notulensi kegiatan
                   </span>
                   <input
                     type="file"
@@ -391,7 +538,6 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                   />
                 </label>
 
-                {/* List Lampiran yang Diunggah */}
                 {dokumentasi.length > 0 && (
                   <div className="mt-2 space-y-1.5">
                     <p className="text-[10.5px] font-bold text-slate-700">
@@ -436,7 +582,7 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                                 className="p-1 rounded text-slate-400 hover:text-emerald-700 hover:bg-slate-100"
                                 title="Lihat"
                               >
-                                <Eye className="w-3.5 h-3.5" />
+                                👁
                               </a>
                             )}
                             <button
@@ -460,9 +606,9 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
           {/* 2B. FORM JIKA PROGRAM TIDAK TERLAKSANA */}
           {statusKeterlaksanaan === 'tidak_terlaksana' && (
             <div className="space-y-3 pt-2 border-t border-slate-100 animate-in fade-in">
-              <div className="p-2.5 bg-rose-50/80 border border-rose-200 rounded-xl text-[11px] text-rose-950 flex items-center gap-2">
+              <div className="p-2.5 bg-rose-50/80 border border-rose-200 rounded-xl text-[11px] text-rose-900 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>Jelaskan kendala atau pertimbangan mengapa program kerja ini tidak dapat terlaksana.</span>
+                <span>Program ditiadakan pada bulan {activeBulanObj?.nama}. Mohon cantumkan alasan.</span>
               </div>
 
               <div>
@@ -470,60 +616,59 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                   Alasan Tidak Terlaksana:
                 </label>
                 <textarea
-                  rows={4}
+                  rows={3}
                   value={alasanTidakTerlaksana}
                   onChange={(e) => setAlasanTidakTerlaksana(e.target.value)}
-                  placeholder="Contoh: Terkendala ketiadaan anggaran, perubahan jadwal kalender keuskupan, atau dialihkan ke semester berikutnya..."
+                  placeholder="Contoh: Terkendala cuaca ekstrem, bentrok dengan kegiatan keuskupan, atau dana belum mencukupi..."
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:border-rose-400 focus:bg-white"
                 />
               </div>
             </div>
           )}
 
-          {/* 2C. FORM JIKA TERJADI PERUBAHAN WAKTU PELAKSANAAN */}
+          {/* 2C. FORM JIKA PERUBAHAN WAKTU PELAKSANAAN */}
           {statusKeterlaksanaan === 'perubahan_waktu' && (
-            <div className="space-y-3.5 pt-2 border-t border-slate-100 animate-in fade-in">
-              <div className="p-2.5 bg-amber-50/90 border border-amber-200 rounded-xl text-[11px] text-amber-950 flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Program tetap direncanakan tetapi mengalami penyesuaian atau pergeseran jadwal pelaksanaan.</span>
+            <div className="space-y-3 pt-2 border-t border-slate-100 animate-in fade-in">
+              <div className="p-2.5 bg-amber-50/80 border border-amber-200 rounded-xl text-[11px] text-amber-950 flex items-center gap-2">
+                <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Pelaksanaan digeser ke waktu lain. Mohon cantumkan tanggal/bulan baru.</span>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Rencana Jadwal / Waktu Baru Pelaksanaan:</span>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Rencana Waktu / Jadwal Baru:
                 </label>
                 <input
                   type="text"
                   value={jadwalBaru}
                   onChange={(e) => setJadwalBaru(e.target.value)}
-                  placeholder="Contoh: Digeser ke Bulan Oktober 2026 / Tanggal 18 November 2026..."
+                  placeholder="Contoh: Digeser ke Bulan November 2026..."
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-400 focus:bg-white"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Alasan Perubahan Waktu Pelaksanaan:
+                  Alasan Perubahan Waktu:
                 </label>
                 <textarea
                   rows={3}
                   value={alasanPerubahanWaktu}
                   onChange={(e) => setAlasanPerubahanWaktu(e.target.value)}
-                  placeholder="Contoh: Menyesuaikan agenda keuskupan, bentrok dengan kegiatan retret dekenat, atau persiapan teknis peserta..."
+                  placeholder="Contoh: Menyesuaikan agenda keuskupan atau persiapan teknis peserta..."
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:border-amber-400 focus:bg-white"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Catatan / Keterangan Penyesuaian (Opsional):
+                  Catatan Tambahan (Opsional):
                 </label>
                 <textarea
                   rows={2}
                   value={penjelasanPerubahan}
                   onChange={(e) => setPenjelasanPerubahan(e.target.value)}
-                  placeholder="Catatan koordinasi lanjutan, lokasi pengganti, atau instruksi untuk panitia..."
+                  placeholder="Catatan koordinasi lanjutan..."
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:border-slate-400 focus:bg-white"
                 />
               </div>
@@ -561,7 +706,7 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
             className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
           >
             <Save className="w-4 h-4" />
-            <span>Simpan Evaluasi</span>
+            <span>Simpan Evaluasi Bulan {activeBulanObj?.nama}</span>
           </button>
         </div>
       </div>

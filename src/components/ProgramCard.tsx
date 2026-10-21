@@ -18,6 +18,7 @@ import {
   getStatusInfo,
   getTipeJadwalLabel,
   BULAN_LIST,
+  getTotalAnggaranTerpakai,
 } from '../utils/formatters';
 
 interface ProgramCardProps {
@@ -60,23 +61,31 @@ export const ProgramCard: React.FC<ProgramCardProps> = ({
           </span>
         </div>
 
-        {/* Status Dropdown/Selector */}
-        <div className="relative">
-          <select
-            value={program.status}
-            onChange={(e) =>
-              onStatusChange(program.id, e.target.value as ProgramStatus)
-            }
-            className={`text-[11px] font-semibold pl-2 pr-5 py-1 rounded-full border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-slate-400 ${statusInfo.color}`}
-          >
-            <option value="direncanakan">Direncanakan</option>
-            <option value="berjalan">Sedang Berjalan</option>
-            <option value="selesai">Selesai</option>
-            <option value="ditunda">Ditunda</option>
-          </select>
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[9px] text-slate-400">
-            ▼
-          </span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {program.evaluasi?.statusKeterlaksanaan === 'terlaksana' && (
+            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 shadow-2xs">
+              <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+              <span>Terlaksana dan Sudah Dievaluasi</span>
+            </span>
+          )}
+          {/* Status Dropdown/Selector */}
+          <div className="relative">
+            <select
+              value={program.status}
+              onChange={(e) =>
+                onStatusChange(program.id, e.target.value as ProgramStatus)
+              }
+              className={`text-[11px] font-semibold pl-2 pr-5 py-1 rounded-full border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-slate-400 ${statusInfo.color}`}
+            >
+              <option value="direncanakan">Direncanakan</option>
+              <option value="berjalan">Sedang Berjalan</option>
+              <option value="selesai">Selesai</option>
+              <option value="ditunda">Ditunda</option>
+            </select>
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[9px] text-slate-400">
+              ▼
+            </span>
+          </div>
         </div>
       </div>
 
@@ -120,11 +129,16 @@ export const ProgramCard: React.FC<ProgramCardProps> = ({
             </div>
             <div>
               <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
-                Estimasi Anggaran
+                Pagu Anggaran
               </p>
               <p className="text-sm font-bold text-slate-900 tabular-nums">
                 {formatRupiah(program.estimasiAnggaran)}
               </p>
+              {getTotalAnggaranTerpakai(program) > 0 && (
+                <p className="text-[10px] text-emerald-800 font-bold mt-0.5">
+                  Sisa: {formatRupiah(Math.max(0, (program.estimasiAnggaran || 0) - getTotalAnggaranTerpakai(program)))}
+                </p>
+              )}
             </div>
           </div>
         </div>

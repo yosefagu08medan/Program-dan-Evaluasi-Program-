@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   Calendar,
   DollarSign,
@@ -8,6 +8,8 @@ import {
   ChevronRight,
   Plus,
   Shield,
+  Bell,
+  AlertCircle,
   Building2,
   Radio,
   HeartHandshake,
@@ -29,6 +31,7 @@ import {
   KeyRound,
   ShieldCheck,
   RotateCcw,
+  Download,
 } from 'lucide-react';
 import { ProgramKerja } from '../types/proker';
 import { AuthSession } from '../types/auth';
@@ -41,6 +44,10 @@ import {
   getStatusInfo,
   isPelayananRutin,
   isDivisionMatch,
+  isProgramBerulang,
+  getEvaluasiForMonth,
+  getAnggaranTerpakaiSebelumBulan,
+  getSisaBudgetUntukBulan,
 } from '../utils/formatters';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
 
@@ -54,19 +61,24 @@ interface DashboardViewProps {
   onSelectSeksi: (seksi: string | 'all') => void;
   onOpenProgramDetail: (programId: string) => void;
   onInputProgramForSeksi: (seksiName: string) => void;
-  onOpenEvaluasi: (program: ProgramKerja) => void;
+  onOpenEvaluasi: (program: ProgramKerja, targetMonth?: number) => void;
   authSession: AuthSession | null;
   onAuthenticate: (session: AuthSession) => void;
   onLockDashboard: () => void;
   onOpenPinManager: () => void;
   onPromptUnlockUnit?: (unitId: string, unitNama: string) => void;
+  onOpenPdfModal?: () => void;
+  onOpenPengurusTab?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   programs,
   selectedYear,
+  onSelectYear,
   selectedMonth,
+  onSelectMonth,
   selectedSeksi,
+  onSelectSeksi,
   onOpenProgramDetail,
   onInputProgramForSeksi,
   onOpenEvaluasi,
@@ -75,7 +87,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onLockDashboard,
   onOpenPinManager,
   onPromptUnlockUnit,
+  onOpenPdfModal,
+  onOpenPengurusTab,
 }) => {
+  // Bulan berjalan default (1 - 12) berdasarkan kalender saat ini
+  const currentCalendarMonth = new Date().getMonth() + 1;
+  const [reminderMonth, setReminderMonth] = useState<number>(() => {
+    if (typeof selectedMonth === 'number') return selectedMonth;
+    return currentCalendarMonth;
+  });
+
+  // Sinkronkan reminderMonth jika selectedMonth dari luar berubah
+  useEffect(() => {
+    if (typeof selectedMonth === 'number') {
+      setReminderMonth(selectedMonth);
+    }
+  }, [selectedMonth]);
+
+  const handleReminderMonthChange = (newMonth: number) => {
+    setReminderMonth(newMonth);
+    onSelectMonth(newMonth);
+  };
+
   // State untuk toggle list pelayanan rutin per seksi (default: hide/tertutup)
   const [expandedSeksiRoutine, setExpandedSeksiRoutine] = useState<Record<string, boolean>>({});
 
@@ -102,6 +135,48 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     if (selectedSeksi === 'all') return programsInYear;
     return programsInYear.filter((p) => isDivisionMatch(p.penanggungjawab?.divisi, selectedSeksi));
   }, [programsInYear, selectedSeksi]);
+
+  // Seksi/Unit aktif yang sedang dilihat (prioritas: seksi login, atau seksi yang difilter)
+  const activeSeksiNama = useMemo(() => {
+    if (authSession?.role === 'seksi') {
+      return authSession.unitNama;
+    }
+    if (selectedSeksi !== 'all') {
+      return selectedSeksi;
+    }
+    return null;
+  }, [authSession, selectedSeksi]);
+
+  // Program milik seksi aktif dalam tahun terpilih
+  const activeSeksiPrograms = useMemo(() => {
+    if (!activeSeksiNama) return [];
+    return programsInYear.filter((p) => isDivisionMatch(p.penanggungjawab?.divisi, activeSeksiNama));
+  }, [programsInYear, activeSeksiNama]);
+
+  // Program kerja terjadwal milik seksi pada reminderMonth
+  const scheduledForSeksiInMonth = useMemo(() => {
+    return activeSeksiPrograms.filter((p) => {
+      if (isPelayananRutin(p)) return false;
+      return Array.isArray(p.bulanPelaksanaan) && p.bulanPelaksanaan.includes(reminderMonth);
+    });
+  }, [activeSeksiPrograms, reminderMonth]);
+
+  // Pelayanan rutin milik seksi
+  const routineForSeksi = useMemo(() => {
+    return activeSeksiPrograms.filter((p) => isPelayananRutin(p));
+  }, [activeSeksiPrograms]);
+
+  // Hitung jumlah program yang sudah dievaluasi vs belum pada bulan pengingat ini
+  const evaluatedCount = useMemo(() => {
+    return scheduledForSeksiInMonth.filter((p) => {
+      const ev = getEvaluasiForMonth(p, reminderMonth);
+      return !!ev?.statusKeterlaksanaan;
+    }).length;
+  }, [scheduledForSeksiInMonth, reminderMonth]);
+
+  const pendingEvaluationCount = scheduledForSeksiInMonth.length - evaluatedCount;
+
+  const activeYearDisplay = selectedYear !== 'all' ? selectedYear : 2026;
 
   // 3. Pisahkan antara Program Terjadwal Khusus vs Pelayanan Rutin Sepanjang Tahun
   // ATURAN: Rapat DPPH BUKAN pelayanan rutin (jadwal pasti).
@@ -176,10 +251,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [routinePrograms]);
 
   const statusCounts = useMemo(() => {
-    const counts = { direncanakan: 0, berlangsung: 0, selesai: 0 };
+    const counts = { direncanakan: 0, berlangsung: 0, selesai: 0, sudahDievaluasi: 0 };
     allActiveProgramsInView.forEach((p) => {
       if (p.status in counts) {
         counts[p.status as keyof typeof counts]++;
+      }
+      if (p.evaluasi?.statusKeterlaksanaan === 'terlaksana') {
+        counts.sudahDievaluasi++;
       }
     });
     return counts;
@@ -236,6 +314,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         initialSelectedUnit={selectedSeksi !== 'all' ? selectedSeksi : 'all'}
         programs={programs}
         selectedYear={selectedYear}
+        onOpenPengurusTab={onOpenPengurusTab}
       />
     );
   }
@@ -308,6 +387,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           )}
 
+          {/* Tombol Akses Cepat Struktur Pengurus */}
+          {onOpenPengurusTab && (
+            <button
+              type="button"
+              onClick={onOpenPengurusTab}
+              className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-[10.5px] font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+              title="Buka susunan pengurus paroki, pastor, DPPH, koordinator seksi dan anggotanya"
+            >
+              <Users className="w-3.5 h-3.5 text-blue-700" />
+              <span>Pengurus Paroki</span>
+            </button>
+          )}
+
           {/* Switch unit for specific seksi */}
           {authSession.role === 'seksi' && onPromptUnlockUnit && (
             <button
@@ -318,6 +410,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             >
               <Building2 className="w-3 h-3 text-slate-500" />
               <span>Ganti Seksi</span>
+            </button>
+          )}
+
+          {/* Download PDF button */}
+          {onOpenPdfModal && (
+            <button
+              type="button"
+              onClick={onOpenPdfModal}
+              className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10.5px] font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+              title={
+                authSession.role === 'pastor_paroki' || authSession.role === 'semua_seksi'
+                  ? 'Download Dokumen PDF Laporan Keseluruhan (Landscape & Diagram)'
+                  : `Download Dokumen PDF Laporan Program ${activeSeksiNama || 'Seksi'} (Landscape & Diagram)`
+              }
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-700" />
+              <span>
+                {authSession.role === 'pastor_paroki' || authSession.role === 'semua_seksi'
+                  ? 'Download PDF (Keseluruhan)'
+                  : `Download PDF (${activeSeksiNama?.replace('Seksi ', '') || 'Seksi'})`}
+              </span>
             </button>
           )}
 
@@ -334,7 +447,285 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* 1. METRIK UTAMA BERDASARKAN BULAN & SEKSI PILIHAN */}
+      {/* =========================================================================
+          1. REMINDER KHUSUS SEKSI YANG BERSANGKUTAN & INPUT EVALUASI
+          "Setelah login dari masing-masing seksi di input maka yang pertama keluar 
+           ada reminder utk seksi yang bersangkutan dan bisa di input utk mengenai evaluasi"
+          ========================================================================= */}
+      {activeSeksiNama && (
+        <div className="bg-white rounded-2xl border border-emerald-500/30 shadow-sm overflow-hidden animate-in fade-in duration-200">
+          {/* Header Reminder Seksi */}
+          <div className="px-3.5 py-3 bg-gradient-to-r from-emerald-900 via-slate-900 to-emerald-950 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-400 flex items-center justify-center font-bold shrink-0 shadow-xs">
+                <Bell className="w-4 h-4 animate-pulse" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xs sm:text-sm font-black tracking-tight text-white">
+                    Reminder Program Kerja {activeSeksiNama}
+                  </h2>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/30 border border-emerald-400/40 text-emerald-200">
+                    Bulan Berjalan: {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama || `Bulan ${reminderMonth}`} {activeYearDisplay}
+                  </span>
+                </div>
+                <p className="text-[10.5px] text-slate-300 mt-0.5">
+                  Agenda pelaksanaan program & silakan langsung isi evaluasi keterlaksanaan kegiatan di bawah.
+                </p>
+              </div>
+            </div>
+
+            {/* Dragdown / Dropdown Select Bulan Lain */}
+            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+              <span className="text-[11px] font-medium text-slate-300">Pilih Bulan:</span>
+              <div className="relative">
+                <select
+                  value={reminderMonth}
+                  onChange={(e) => handleReminderMonthChange(Number(e.target.value))}
+                  className="appearance-none bg-emerald-950/90 hover:bg-emerald-900 text-white text-xs font-bold pl-2.5 pr-7 py-1 rounded-lg border border-emerald-400/50 cursor-pointer focus:outline-none focus:ring-1 focus:ring-emerald-400 shadow-xs transition-colors"
+                >
+                  {BULAN_LIST.map((b) => (
+                    <option key={b.no} value={b.no} className="text-slate-900 bg-white font-medium">
+                      {b.nama} {b.no === currentCalendarMonth ? ' (Bulan Ini)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-emerald-300 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            </div>
+          </div>
+
+          {/* Body Reminder Seksi */}
+          <div className="p-3.5 sm:p-5 space-y-4">
+            {/* Status Ringkasan Evaluasi Bulan Ini */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-slate-800">
+                  Status Evaluasi {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama}:
+                </span>
+                {scheduledForSeksiInMonth.length === 0 ? (
+                  <span className="text-slate-500 font-medium">Tidak ada program khusus terjadwal</span>
+                ) : pendingEvaluationCount > 0 ? (
+                  <span className="inline-flex items-center gap-1 font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 text-[11px]">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                    <span>{pendingEvaluationCount} Program Perlu Diisi Evaluasi</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 text-[11px]">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Semua Program ({evaluatedCount}) Sudah Dievaluasi ✓</span>
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                <span>{scheduledForSeksiInMonth.length} Terjadwal</span>
+                <span>•</span>
+                <span>{routineForSeksi.length} Pelayanan Rutin</span>
+              </div>
+            </div>
+
+            {/* DAFTAR PROGRAM KERJA TERJADWAL & TOMBOL INPUT EVALUASI */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Program Kerja Terjadwal Bulan {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama}</span>
+                </h3>
+                <span className="text-[11px] font-bold text-slate-500">
+                  {scheduledForSeksiInMonth.length} Kegiatan
+                </span>
+              </div>
+
+              {scheduledForSeksiInMonth.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {scheduledForSeksiInMonth.map((p) => {
+                    const targetDate = p.jadwalBulanan?.[reminderMonth] || p.tanggalSpesifik;
+                    const formattedDate = targetDate ? formatIndonesianDate(targetDate) : 'Sesuai Jadwal';
+                    const evBulanIni = getEvaluasiForMonth(p, reminderMonth);
+                    const hasEvaluasi = !!evBulanIni?.statusKeterlaksanaan;
+                    const sisaBudget = getSisaBudgetUntukBulan(p, reminderMonth);
+
+                    return (
+                      <div
+                        key={p.id}
+                        className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between gap-3 shadow-xs ${
+                          hasEvaluasi
+                            ? 'bg-emerald-50/20 border-emerald-200/90 hover:border-emerald-300'
+                            : 'bg-amber-50/40 border-amber-300 hover:border-amber-400'
+                        }`}
+                      >
+                        <div>
+                          {/* Header item: Jadwal & Status Evaluasi badge */}
+                          <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                            <span className="text-[9.5px] font-bold text-slate-500">
+                              🗓 {formattedDate}
+                            </span>
+                            {hasEvaluasi ? (
+                              evBulanIni?.statusKeterlaksanaan === 'terlaksana' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-extrabold flex items-center gap-1 shadow-2xs">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                  <span>Terlaksana dan Sudah Dievaluasi (Bln {reminderMonth})</span>
+                                </span>
+                              ) : evBulanIni?.statusKeterlaksanaan === 'perubahan_waktu' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-extrabold flex items-center gap-1">
+                                  <span>⏳ Geser Waktu (Sudah Dievaluasi)</span>
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-900 border border-rose-300 text-[10px] font-extrabold flex items-center gap-1">
+                                  <span>✕ Tidak Terlaksana (Sudah Dievaluasi)</span>
+                                </span>
+                              )
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-extrabold flex items-center gap-1 animate-pulse">
+                                <AlertCircle className="w-3 h-3 text-amber-700" />
+                                <span>Belum Dievaluasi Bulan {BULAN_LIST[reminderMonth - 1]?.singkatan}</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Nama Program */}
+                          <h4 className="text-xs sm:text-sm font-extrabold text-slate-900 leading-snug">
+                            {p.namaProgram}
+                          </h4>
+
+                          {/* Info Ringkas: Anggaran & Evaluasi info */}
+                          <div className="flex items-center gap-2 text-[10.5px] text-slate-500 mt-1 flex-wrap">
+                            <span>Pagu Awal: <strong className="text-slate-800">{formatRupiah(p.estimasiAnggaran)}</strong></span>
+                            <span>•</span>
+                            <span>Sisa Budget Bulan Ini: <strong className="text-emerald-800 font-extrabold">{formatRupiah(sisaBudget)}</strong></span>
+                            {evBulanIni?.tempatPelaksanaan && (
+                              <>
+                                <span>•</span>
+                                <span>Lokasi: {evBulanIni.tempatPelaksanaan}</span>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Catatan hasil evaluasi jika sudah ada */}
+                          {evBulanIni?.penjelasanKegiatan && (
+                            <p className="text-[11px] text-slate-600 bg-white/70 p-2 rounded-lg border border-slate-200/80 mt-2 line-clamp-2">
+                              <span className="font-semibold text-slate-700">Catatan Evaluasi: </span>
+                              {evBulanIni.penjelasanKegiatan}
+                            </p>
+                          )}
+                          {evBulanIni?.alasanTidakTerlaksana && (
+                            <p className="text-[11px] text-rose-700 bg-rose-50/80 p-2 rounded-lg border border-rose-200 mt-2 line-clamp-2">
+                              <span className="font-semibold">Alasan Tidak Terlaksana: </span>
+                              {evBulanIni.alasanTidakTerlaksana}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* TOMBOL AKSI: INPUT EVALUASI & LIHAT DETAIL */}
+                        <div className="flex items-center gap-2 pt-2 border-t border-slate-200/60">
+                          <button
+                            type="button"
+                            onClick={() => onOpenEvaluasi(p, reminderMonth)}
+                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer ${
+                              hasEvaluasi
+                                ? 'bg-white hover:bg-slate-100 text-slate-800 border border-slate-300'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 active:scale-98'
+                            }`}
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>{hasEvaluasi ? `✏️ Ubah Evaluasi (${BULAN_LIST[reminderMonth - 1]?.singkatan})` : `📝 Input Evaluasi (${BULAN_LIST[reminderMonth - 1]?.singkatan})`}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => onOpenProgramDetail(p.id)}
+                            className="py-1.5 px-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Buka detail perencanaan program"
+                          >
+                            <span>Detail</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-6 px-4 text-center rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                  <Calendar className="w-7 h-7 text-slate-400 mx-auto" />
+                  <p className="text-xs font-bold text-slate-700">
+                    Tidak ada program kerja khusus non-rutin yang terjadwal di bulan {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama}.
+                  </p>
+                  <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                    Seksi {activeSeksiNama} dapat melihat kegiatan pelayanan rutin di bawah ini atau memilih bulan lain dari dropdown di atas.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* PELAYANAN RUTIN SEKSI YANG BERSANGKUTAN DENGAN AKSES INPUT EVALUASI */}
+            {routineForSeksi.length > 0 && (
+              <div className="pt-2 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Repeat className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Info Pelayanan Rutin {activeSeksiNama}</span>
+                  </h3>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    {routineForSeksi.length} Agenda Tetap
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {routineForSeksi.map((r) => {
+                    const evBulanIni = getEvaluasiForMonth(r, reminderMonth);
+                    const hasEvaluasi = !!evBulanIni?.statusKeterlaksanaan;
+                    const sisaBudget = getSisaBudgetUntukBulan(r, reminderMonth);
+
+                    return (
+                      <div
+                        key={r.id}
+                        className="p-3 rounded-xl bg-amber-50/30 border border-amber-200/80 hover:border-amber-300 transition-all flex items-center justify-between gap-2.5"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                            <h5 className="text-xs font-bold text-slate-900 truncate">
+                              {r.namaProgram}
+                            </h5>
+                            {evBulanIni?.statusKeterlaksanaan === 'terlaksana' && (
+                              <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[9px] font-extrabold flex items-center gap-0.5 shadow-2xs">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
+                                <span>Terlaksana Bulan {BULAN_LIST[reminderMonth - 1]?.singkatan}</span>
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-500 pl-3 flex items-center gap-1.5 flex-wrap">
+                            <span>Pagu: {formatRupiah(r.estimasiAnggaran)}</span>
+                            <span>•</span>
+                            <span>Sisa Bln {reminderMonth}: <strong className="text-emerald-800 font-extrabold">{formatRupiah(sisaBudget)}</strong></span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => onOpenEvaluasi(r, reminderMonth)}
+                          className={`px-2.5 py-1 rounded-lg text-[10.5px] font-bold border transition-colors flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs ${
+                            hasEvaluasi
+                              ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+                              : 'bg-white hover:bg-amber-100 text-amber-900 border-amber-300'
+                          }`}
+                          title={`Input atau lihat evaluasi pelayanan rutin bulan ${BULAN_LIST[reminderMonth - 1]?.nama}`}
+                        >
+                          <FileText className="w-3 h-3 text-amber-700" />
+                          <span>{hasEvaluasi ? `✓ Selesai (${BULAN_LIST[reminderMonth - 1]?.singkatan})` : `Evaluasi (${BULAN_LIST[reminderMonth - 1]?.singkatan})`}</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 2. METRIK UTAMA BERDASARKAN BULAN & SEKSI PILIHAN */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full">
         {/* Metric 1: Total Program (Terjadwal vs Pelayanan Rutin) */}
         <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-2xs">
@@ -416,8 +807,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {statusCounts.selesai} Selesai
             </span>
           </div>
-          <p className="text-[9.5px] text-slate-400 mt-1 truncate">
-            {statusCounts.berlangsung} sedang berjalan
+          <p className="text-[9.5px] font-semibold mt-1 truncate text-emerald-800">
+            {statusCounts.sudahDievaluasi > 0
+              ? `${statusCounts.sudahDievaluasi} Terlaksana & Sudah Dievaluasi`
+              : `${statusCounts.berlangsung} Sedang Berjalan`}
           </p>
         </div>
       </div>
@@ -513,11 +906,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     {seksiScheduled.length > 0 ? (
                       <div className="space-y-1 w-full">
                         {seksiScheduled.map((p) => {
+                          const targetMonth = typeof selectedMonth === 'number' ? selectedMonth : 10;
                           const targetDate =
                             typeof selectedMonth === 'number'
                               ? p.jadwalBulanan?.[selectedMonth] || p.tanggalSpesifik
                               : p.tanggalSpesifik;
                           const formattedDate = targetDate ? formatIndonesianDate(targetDate) : 'Sesuai Jadwal';
+                          const evBulanIni = getEvaluasiForMonth(p, targetMonth);
+                          const sisaBudget = getSisaBudgetUntukBulan(p, targetMonth);
 
                           return (
                             <div
@@ -533,19 +929,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                   <span className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded border ${getStatusInfo(p.status).color}`}>
                                     {getStatusInfo(p.status).label}
                                   </span>
-                                  {p.evaluasi?.statusKeterlaksanaan === 'terlaksana' && (
-                                    <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                      ✓ Terlaksana
+                                  {evBulanIni?.statusKeterlaksanaan === 'terlaksana' && (
+                                    <span className="text-[8.5px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-0.5 shadow-2xs">
+                                      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
+                                      <span>Terlaksana Bln {targetMonth}</span>
                                     </span>
                                   )}
-                                  {p.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana' && (
+                                  {evBulanIni?.statusKeterlaksanaan === 'tidak_terlaksana' && (
                                     <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
                                       ✕ Tidak Terlaksana
                                     </span>
                                   )}
-                                  {p.evaluasi?.statusKeterlaksanaan === 'perubahan_waktu' && (
+                                  {evBulanIni?.statusKeterlaksanaan === 'perubahan_waktu' && (
                                     <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
-                                      ⏳ Geser Waktu {p.evaluasi.jadwalBaru ? `(${p.evaluasi.jadwalBaru})` : ''}
+                                      ⏳ Geser Waktu {evBulanIni.jadwalBaru ? `(${evBulanIni.jadwalBaru})` : ''}
                                     </span>
                                   )}
                                   <p className="text-[11.5px] sm:text-xs font-bold text-slate-900 group-hover:text-emerald-950 truncate">
@@ -555,8 +952,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5 flex-wrap">
                                   <span>🗓 {formattedDate}</span>
                                   <span>•</span>
-                                  <span className="font-bold text-emerald-800">
-                                    {formatRupiah(p.estimasiAnggaran)}
+                                  <span>Pagu: {formatRupiah(p.estimasiAnggaran)}</span>
+                                  <span>•</span>
+                                  <span className="font-extrabold text-emerald-800">
+                                    Sisa: {formatRupiah(sisaBudget)}
                                   </span>
                                 </div>
                               </button>
@@ -567,13 +966,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    onOpenEvaluasi(p);
+                                    onOpenEvaluasi(p, targetMonth);
                                   }}
-                                  className="px-2 py-1 rounded-md text-[9.5px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
-                                  title="Isi atau lihat evaluasi pelaksanaan program"
+                                  className={`px-2 py-1 rounded-md text-[9.5px] font-bold border transition-colors flex items-center gap-1 cursor-pointer shadow-2xs ${
+                                    evBulanIni?.statusKeterlaksanaan
+                                      ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+                                      : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                                  }`}
+                                  title={`Isi atau lihat evaluasi pelaksanaan bulan ${targetMonth}`}
                                 >
                                   <FileText className="w-3 h-3 text-amber-700" />
-                                  <span>{p.evaluasi?.statusKeterlaksanaan ? 'Evaluasi' : 'Evaluasi'}</span>
+                                  <span>{evBulanIni?.statusKeterlaksanaan ? `✓ Evaluasi (${targetMonth})` : `Evaluasi (${targetMonth})`}</span>
                                 </button>
 
                                 <button
@@ -639,7 +1042,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             </div>
 
                             <div className="space-y-1.5 w-full">
-                              {seksiRoutine.map((r, rIdx) => (
+                              {seksiRoutine.map((r, rIdx) => {
+                                const targetMonth = typeof selectedMonth === 'number' ? selectedMonth : 10;
+                                const evBulanIni = getEvaluasiForMonth(r, targetMonth);
+                                const sisaBudget = getSisaBudgetUntukBulan(r, targetMonth);
+
+                                return (
                                 <div
                                   key={r.id}
                                   className="w-full p-2.5 rounded-lg bg-white border border-indigo-200/90 shadow-2xs hover:border-indigo-300 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2"
@@ -653,19 +1061,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                         <h5 className="text-xs font-bold text-slate-900 truncate">
                                           {r.namaProgram}
                                         </h5>
-                                        {r.evaluasi?.statusKeterlaksanaan === 'terlaksana' && (
-                                          <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                            ✓ Terlaksana
+                                        {evBulanIni?.statusKeterlaksanaan === 'terlaksana' && (
+                                          <span className="text-[8.5px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-0.5 shadow-2xs">
+                                            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
+                                            <span>Terlaksana Bln {targetMonth}</span>
                                           </span>
                                         )}
-                                        {r.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana' && (
+                                        {evBulanIni?.statusKeterlaksanaan === 'tidak_terlaksana' && (
                                           <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
                                             ✕ Tidak Terlaksana
                                           </span>
                                         )}
-                                        {r.evaluasi?.statusKeterlaksanaan === 'perubahan_waktu' && (
+                                        {evBulanIni?.statusKeterlaksanaan === 'perubahan_waktu' && (
                                           <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
-                                            ⏳ Geser Waktu {r.evaluasi.jadwalBaru ? `(${r.evaluasi.jadwalBaru})` : ''}
+                                            ⏳ Geser Waktu {evBulanIni.jadwalBaru ? `(${evBulanIni.jadwalBaru})` : ''}
                                           </span>
                                         )}
                                       </div>
@@ -679,8 +1088,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                           🗓 Berjalan setiap bulan (Jan - Des)
                                         </span>
                                         <span>•</span>
+                                        <span>Pagu: {formatRupiah(r.estimasiAnggaran)}</span>
+                                        <span>•</span>
                                         <span className="font-extrabold text-emerald-800">
-                                          {formatRupiah(r.estimasiAnggaran)}
+                                          Sisa Bln {targetMonth}: {formatRupiah(sisaBudget)}
                                         </span>
                                       </div>
                                     </div>
@@ -690,12 +1101,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                   <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
                                     <button
                                       type="button"
-                                      onClick={() => onOpenEvaluasi(r)}
-                                      className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-md text-[9.5px] font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
-                                      title="Isi atau lihat evaluasi pelaksanaan program"
+                                      onClick={() => onOpenEvaluasi(r, targetMonth)}
+                                      className={`px-2 py-1 rounded-md text-[9.5px] font-bold border transition-colors flex items-center gap-1 cursor-pointer shadow-2xs ${
+                                        evBulanIni?.statusKeterlaksanaan
+                                          ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+                                          : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                                      }`}
+                                      title={`Isi atau lihat evaluasi pelaksanaan bulan ${targetMonth}`}
                                     >
                                       <FileText className="w-3 h-3 text-amber-700" />
-                                      <span>Evaluasi</span>
+                                      <span>{evBulanIni?.statusKeterlaksanaan ? `✓ Evaluasi (${targetMonth})` : `Evaluasi (${targetMonth})`}</span>
                                     </button>
 
                                     <button
@@ -708,7 +1123,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                     </button>
                                   </div>
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -782,17 +1198,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <span className="text-[9.5px] text-slate-400 font-semibold">
                           Thn {p.tahun}
                         </span>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${getStatusInfo(p.status).color}`}>
-                          {getStatusInfo(p.status).label}
-                        </span>
-                        {p.evaluasi?.statusKeterlaksanaan === 'terlaksana' && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
-                            ✓ Terlaksana
+                        {p.evaluasi?.statusKeterlaksanaan === 'terlaksana' ? (
+                          <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 shadow-2xs">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                            <span>Terlaksana dan Sudah Dievaluasi</span>
+                          </span>
+                        ) : (
+                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${getStatusInfo(p.status).color}`}>
+                            {getStatusInfo(p.status).label}
                           </span>
                         )}
                         {p.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana' && (
                           <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
-                            ✕ Tidak Terlaksana
+                            ✕ Tidak Terlaksana (Sudah Dievaluasi)
+                          </span>
+                        )}
+                        {p.evaluasi?.statusKeterlaksanaan === 'perubahan_waktu' && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                            ⏳ Geser Waktu (Sudah Dievaluasi)
                           </span>
                         )}
                       </div>
@@ -815,11 +1238,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenEvaluasi(p)}
-                      className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors flex items-center gap-1 cursor-pointer shadow-2xs ${
+                        p.evaluasi?.statusKeterlaksanaan
+                          ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+                          : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                      }`}
                       title="Isi atau lihat evaluasi pelaksanaan program"
                     >
                       <FileText className="w-3.5 h-3.5 text-amber-700" />
-                      <span>{p.evaluasi?.statusKeterlaksanaan ? 'Evaluasi' : 'Evaluasi'}</span>
+                      <span>{p.evaluasi?.statusKeterlaksanaan ? '✓ Sudah Dievaluasi' : 'Evaluasi'}</span>
                     </button>
 
                     <button
@@ -903,13 +1330,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           🔄 Pelayanan Rutin
                         </span>
                         {p.evaluasi?.statusKeterlaksanaan === 'terlaksana' && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
-                            ✓ Terlaksana
+                          <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 shadow-2xs">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                            <span>Terlaksana dan Sudah Dievaluasi</span>
                           </span>
                         )}
                         {p.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana' && (
                           <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
-                            ✕ Tidak Terlaksana
+                            ✕ Tidak Terlaksana (Sudah Dievaluasi)
+                          </span>
+                        )}
+                        {p.evaluasi?.statusKeterlaksanaan === 'perubahan_waktu' && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                            ⏳ Geser Waktu (Sudah Dievaluasi)
                           </span>
                         )}
                       </div>
@@ -942,11 +1375,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenEvaluasi(p)}
-                      className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg font-bold text-[10px] transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                      className={`px-2.5 py-1.5 rounded-lg font-bold text-[10px] border transition-colors flex items-center gap-1 shadow-2xs cursor-pointer ${
+                        p.evaluasi?.statusKeterlaksanaan
+                          ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+                          : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                      }`}
                       title="Isi atau lihat evaluasi pelaksanaan program"
                     >
                       <FileText className="w-3 h-3 text-amber-700" />
-                      <span>Evaluasi</span>
+                      <span>{p.evaluasi?.statusKeterlaksanaan ? '✓ Sudah Dievaluasi' : 'Evaluasi'}</span>
                     </button>
 
                     <button

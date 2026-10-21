@@ -1,4 +1,4 @@
-import { ProgramKerja, ScheduleType, ProgramStatus } from '../types/proker';
+import { ProgramKerja, ScheduleType, ProgramStatus, EvaluasiProgram } from '../types/proker';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
 
 export const BULAN_LIST = [
@@ -240,6 +240,100 @@ export function isPelayananRutin(p: ProgramKerja): boolean {
   }
 
   return false;
+}
+
+/**
+ * Cek apakah suatu program dilaksanakan secara berulang/setiap bulan:
+ * Termasuk tipeJadwal sepanjang_tahun, multi_bulan, Rapat DPPH, atau program dengan bulanPelaksanaan > 1
+ */
+export function isProgramBerulang(p: ProgramKerja): boolean {
+  if (p.tipeJadwal === 'sepanjang_tahun') return true;
+  if (isPelayananRutin(p)) return true;
+  if (isRapatDPPH(p)) return true;
+  if (Array.isArray(p.bulanPelaksanaan) && p.bulanPelaksanaan.length > 1) return true;
+  return false;
+}
+
+/**
+ * Ambil data evaluasi untuk bulan tertentu:
+ * Jika program berulang/rutin, utamakan evaluasiBulanan[bulan].
+ * Fallback ke evaluasi single jika cocok atau jika program hanya 1 bulan.
+ */
+export function getEvaluasiForMonth(p: ProgramKerja, bulan: number): EvaluasiProgram | undefined {
+  if (p.evaluasiBulanan && p.evaluasiBulanan[bulan]) {
+    return p.evaluasiBulanan[bulan];
+  }
+  // Jika program satu kali atau evaluasi umum yang tanggalnya jatuh di bulan ini
+  if (p.evaluasi) {
+    if (!isProgramBerulang(p)) {
+      return p.evaluasi;
+    }
+    // Jika evaluasi lama tersimpan di p.evaluasi dan tanggalnya sesuai bulan
+    if (p.evaluasi.tanggalPelaksanaan) {
+      const monthFromDate = parseInt(p.evaluasi.tanggalPelaksanaan.split('-')[1], 10);
+      if (monthFromDate === bulan) {
+        return p.evaluasi;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Hitung total anggaran terpakai pada bulan-bulan sebelum bulan target:
+ * Misalnya target bulan 2 (Februari), jumlahkan pemakaian riil di bulan 1 (Januari).
+ * Jika ada pemakaian di bulan Januari misal 711.900 dari pagu 15.600.000,
+ * maka sisa budget sebelum Februari adalah 15.600.000 - 711.900 = 14.888.100.
+ */
+export function getAnggaranTerpakaiSebelumBulan(p: ProgramKerja, bulanTarget: number): number {
+  let total = 0;
+  if (!p.evaluasiBulanan) {
+    // Cek jika p.evaluasi lama ada dan tanggalnya sebelum bulan target
+    if (p.evaluasi?.statusKeterlaksanaan === 'terlaksana' && p.evaluasi.anggaranTerpakai) {
+      const m = p.evaluasi.tanggalPelaksanaan ? parseInt(p.evaluasi.tanggalPelaksanaan.split('-')[1], 10) : null;
+      if (m && m < bulanTarget) {
+        total += p.evaluasi.anggaranTerpakai;
+      }
+    }
+    return total;
+  }
+
+  for (let m = 1; m < bulanTarget; m++) {
+    const ev = p.evaluasiBulanan[m];
+    if (ev && ev.statusKeterlaksanaan === 'terlaksana' && typeof ev.anggaranTerpakai === 'number') {
+      total += ev.anggaranTerpakai;
+    }
+  }
+  return total;
+}
+
+/**
+ * Hitung sisa budget program yang tersedia untuk bulan tertentu (setelah dikurangi pengeluaran bulan-bulan sebelumnya).
+ */
+export function getSisaBudgetUntukBulan(p: ProgramKerja, bulanTarget: number): number {
+  const terpakaiSebelumnya = getAnggaranTerpakaiSebelumBulan(p, bulanTarget);
+  const totalBudget = p.estimasiAnggaran || 0;
+  return Math.max(0, totalBudget - terpakaiSebelumnya);
+}
+
+/**
+ * Total akumulasi seluruh realisasi anggaran yang terpakai sepanjang tahun untuk suatu program.
+ */
+export function getTotalAnggaranTerpakai(p: ProgramKerja): number {
+  let total = 0;
+  if (p.evaluasiBulanan) {
+    for (let m = 1; m <= 12; m++) {
+      const ev = p.evaluasiBulanan[m];
+      if (ev && ev.statusKeterlaksanaan === 'terlaksana' && typeof ev.anggaranTerpakai === 'number') {
+        total += ev.anggaranTerpakai;
+      }
+    }
+  }
+  // Jika belum ada di evaluasiBulanan tapi ada di p.evaluasi
+  if (total === 0 && p.evaluasi?.statusKeterlaksanaan === 'terlaksana' && p.evaluasi.anggaranTerpakai) {
+    total = p.evaluasi.anggaranTerpakai;
+  }
+  return total;
 }
 
 export function getStatusInfo(status: ProgramStatus) {

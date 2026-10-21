@@ -40,6 +40,10 @@ export interface EvaluasiProgram {
   evaluator?: string;
 }
 
+export interface EvaluasiBulanan {
+  [bulan: number]: EvaluasiProgram; // 1 = Januari, ..., 12 = Desember
+}
+
 export interface ProgramKerja {
   id: string;
   tahun: 2026 | 2027;
@@ -54,7 +58,8 @@ export interface ProgramKerja {
   jadwalBulanan?: Record<number, string>; // Rencana tanggal pelaksanaan untuk tiap bulan (1-12)
   penanggungjawab: PenanggungJawab;
   status: ProgramStatus;
-  evaluasi?: EvaluasiProgram; // Menu & data evaluasi keterlaksanaan program kerja
+  evaluasi?: EvaluasiProgram; // Evaluasi tunggal atau fallback
+  evaluasiBulanan?: EvaluasiBulanan; // Evaluasi per bulan (1-12) untuk program rutin/berulang
   catatan?: string;
   createdAt: string;
   updatedAt: string;

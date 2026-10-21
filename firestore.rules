@@ -71,5 +71,23 @@ service cloud.firestore {
       allow get: if true;
       allow write: if true;
     }
+
+    // 7. Pengurus Paroki Collection (Pastor Paroki, Vikaris, DPPH, Seksi & Anggotanya)
+    match /pengurus/{pengurusId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(pengurusId)
+        && incoming().id == pengurusId
+        && incoming().nama is string;
+      allow delete: if isValidId(pengurusId);
+    }
+
+    // 8. Master Jabatan Pengurus Paroki
+    match /master_jabatan/{jabatanId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(jabatanId)
+        && incoming().id == jabatanId
+        && incoming().nama is string;
+      allow delete: if isValidId(jabatanId);
+    }
   }
 }

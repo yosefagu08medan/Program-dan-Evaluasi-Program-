@@ -32,6 +32,8 @@ import {
   LogOut,
   KeyRound,
   ShieldCheck,
+  Users,
+  Briefcase,
 } from 'lucide-react';
 import { ProgramKerja, ScheduleType, ProgramStatus } from './types/proker';
 import { INITIAL_PROGRAM_KERJA } from './data/initialData';
@@ -58,8 +60,13 @@ import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { EvaluasiModal } from './components/EvaluasiModal';
 import { PinManagementModal } from './components/PinManagementModal';
 import { UnlockUnitModal } from './components/UnlockUnitModal';
+import { DownloadPdfModal } from './components/DownloadPdfModal';
+import { PengurusView } from './components/PengurusView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { EvaluasiProgram } from './types/proker';
+import { PengurusItem, MasterJabatan } from './types/pengurus';
+import { INITIAL_PENGURUS_PAROKI } from './data/initialPengurus';
+import { INITIAL_MASTER_JABATAN } from './data/initialJabatan';
 import { AuthSession } from './types/auth';
 import { authPinService } from './utils/authPinService';
 
@@ -75,6 +82,24 @@ export default function App() {
     }
   });
 
+  // Pengurus Paroki State (Pastor Paroki, Vikaris, DPPH, Seksi & Anggotanya)
+  const [pengurusList, setPengurusList] = useState<PengurusItem[]>(() => {
+    try {
+      return dbService.getPengurus();
+    } catch (e) {
+      return INITIAL_PENGURUS_PAROKI;
+    }
+  });
+
+  // Master List Jabatan Pengurus (Pastor Paroki, Vikaris, DPPH, Koordinator Seksi, Anggota)
+  const [masterJabatanList, setMasterJabatanList] = useState<MasterJabatan[]>(() => {
+    try {
+      return dbService.getMasterJabatan();
+    } catch (e) {
+      return INITIAL_MASTER_JABATAN;
+    }
+  });
+
   // Subscribe to real-time Cloud Firestore & local database changes
   useEffect(() => {
     const unsubscribe = dbService.subscribe((updated) => {
@@ -82,7 +107,24 @@ export default function App() {
         setPrograms(updated);
       }
     });
-    return () => unsubscribe();
+
+    const unsubscribePengurus = dbService.subscribePengurus((updated) => {
+      if (Array.isArray(updated) && updated.length > 0) {
+        setPengurusList(updated);
+      }
+    });
+
+    const unsubscribeJabatan = dbService.subscribeMasterJabatan((updated) => {
+      if (Array.isArray(updated) && updated.length > 0) {
+        setMasterJabatanList(updated);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribePengurus();
+      unsubscribeJabatan();
+    };
   }, []);
 
   // 1B. Authentication & Security State
@@ -94,7 +136,7 @@ export default function App() {
   const [unlockTarget, setUnlockTarget] = useState<{ unitId: string; unitNama: string } | null>(null);
 
   // 2. Filters & Navigation Tabs
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'input'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'input' | 'pengurus'>('dashboard');
   const [selectedYear, setSelectedYear] = useState<'all' | 2026 | 2027>('all');
   const [selectedMonth, setSelectedMonth] = useState<number | 'all'>('all'); // Default 'all' atau bulan tertentu (1-12)
   const [selectedSeksi, setSelectedSeksi] = useState<string | 'all'>(() => {
@@ -109,6 +151,7 @@ export default function App() {
   const [isMobileDeviceFrame, setIsMobileDeviceFrame] = useState<boolean>(false);
   const [showSummaryModal, setShowSummaryModal] = useState<boolean>(false);
   const [evaluatingProgram, setEvaluatingProgram] = useState<ProgramKerja | null>(null);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -125,6 +168,7 @@ export default function App() {
     } else {
       setSelectedSeksi('all');
     }
+    setActiveTab('dashboard');
     showToast(`Sesi dibuka: ${session.unitNama}`);
   };
 
@@ -133,6 +177,65 @@ export default function App() {
     setAuthSession(null);
     setSelectedSeksi('all');
     showToast('Dashboard telah dikunci. Data program disembunyikan.');
+  };
+
+  // Pengurus Handlers (Khusus Hak Akses Pastor Paroki / Admin)
+  const handleSavePengurus = async (item: PengurusItem) => {
+    if (authSession?.role !== 'pastor_paroki' && authSession?.role !== 'semua_seksi') {
+      showToast('Akses ditolak: Hanya Pastor Paroki atau Admin yang dapat mengedit susunan pengurus.');
+      return;
+    }
+    await dbService.savePengurus(item);
+    showToast(`Data "${item.nama}" berhasil disimpan!`);
+  };
+
+  const handleDeletePengurus = async (id: string) => {
+    if (authSession?.role !== 'pastor_paroki' && authSession?.role !== 'semua_seksi') {
+      showToast('Akses ditolak: Hanya Pastor Paroki atau Admin yang dapat menghapus pengurus.');
+      return;
+    }
+    // Optimistically and immediately remove from local state
+    setPengurusList((prev) => prev.filter((p) => p.id !== id));
+    await dbService.deletePengurus(id);
+    showToast('Data pengurus berhasil dihapus.');
+  };
+
+  const handleResetPengurus = async () => {
+    if (authSession?.role !== 'pastor_paroki' && authSession?.role !== 'semua_seksi') {
+      showToast('Akses ditolak: Hanya Pastor Paroki atau Admin yang dapat mereset susunan pengurus.');
+      return;
+    }
+    await dbService.saveAllPengurus(INITIAL_PENGURUS_PAROKI);
+    showToast('Susunan pengurus berhasil dipulihkan ke default!');
+  };
+
+  // Master Jabatan Handlers (Khusus Hak Akses Pastor Paroki / Admin)
+  const handleSaveJabatan = async (item: MasterJabatan) => {
+    if (authSession?.role !== 'pastor_paroki' && authSession?.role !== 'semua_seksi') {
+      showToast('Akses ditolak: Hanya Pastor Paroki atau Admin yang dapat mengelola list jabatan.');
+      return;
+    }
+    await dbService.saveMasterJabatan(item);
+    showToast(`Jabatan "${item.nama}" berhasil disimpan!`);
+  };
+
+  const handleDeleteJabatan = async (id: string) => {
+    if (authSession?.role !== 'pastor_paroki' && authSession?.role !== 'semua_seksi') {
+      showToast('Akses ditolak: Hanya Pastor Paroki atau Admin yang dapat menghapus jabatan.');
+      return;
+    }
+    setMasterJabatanList((prev) => prev.filter((j) => j.id !== id));
+    await dbService.deleteMasterJabatan(id);
+    showToast('Jabatan berhasil dihapus dari list.');
+  };
+
+  const handleResetJabatan = async () => {
+    if (authSession?.role !== 'pastor_paroki' && authSession?.role !== 'semua_seksi') {
+      showToast('Akses ditolak: Hanya Pastor Paroki atau Admin yang dapat mereset list jabatan.');
+      return;
+    }
+    await dbService.resetMasterJabatan();
+    showToast('Daftar jabatan berhasil dipulihkan ke bawaan paroki.');
   };
 
   // Handler pergantian seksi dengan verifikasi PIN
@@ -176,26 +279,46 @@ export default function App() {
     });
   };
 
+  const [evaluatingMonth, setEvaluatingMonth] = useState<number | undefined>(undefined);
+
   // Simpan hasil evaluasi program kerja (1. Terlaksana, 2. Tidak Terlaksana, 3. Perubahan waktu pelaksanaan)
-  const handleSaveEvaluasi = (programId: string, evaluasiData: EvaluasiProgram) => {
+  // Mendukung evaluasi per-bulan untuk program yang berlangsung setiap bulan / sepanjang tahun
+  const handleSaveEvaluasi = (programId: string, evaluasiData: EvaluasiProgram, targetBulan?: number) => {
     const prog = programs.find((p) => p.id === programId);
     if (!prog) return;
+
+    let updatedEvaluasiBulanan = { ...(prog.evaluasiBulanan || {}) };
+    let monthForSave = targetBulan;
+
+    if (!monthForSave && evaluasiData.tanggalPelaksanaan) {
+      const parsedMo = parseInt(evaluasiData.tanggalPelaksanaan.split('-')[1], 10);
+      if (parsedMo >= 1 && parsedMo <= 12) {
+        monthForSave = parsedMo;
+      }
+    }
+
+    if (monthForSave) {
+      updatedEvaluasiBulanan[monthForSave] = evaluasiData;
+    }
+
+    // Untuk status program: jika program satu kali, langsung selesai.
+    // Jika program berulang/sepanjang tahun, tetap 'berjalan' jika belum semua bulan selesai, atau 'berjalan' jika sedang aktif
+    const isBerulang = prog.tipeJadwal === 'sepanjang_tahun' || (prog.bulanPelaksanaan && prog.bulanPelaksanaan.length > 1);
+
     const updated: ProgramKerja = {
       ...prog,
-      evaluasi: evaluasiData,
-      status:
-        evaluasiData.statusKeterlaksanaan === 'terlaksana'
-          ? 'selesai'
-          : evaluasiData.statusKeterlaksanaan === 'perubahan_waktu'
-          ? 'direncanakan'
-          : prog.status,
+      evaluasi: evaluasiData, // Simpan evaluasi terakhir/aktif
+      evaluasiBulanan: updatedEvaluasiBulanan,
+      status: !isBerulang && evaluasiData.statusKeterlaksanaan === 'terlaksana' ? 'selesai' : prog.status || 'berjalan',
       updatedAt: new Date().toISOString(),
     };
+
     dbService.saveProgram(updated);
     if (currentId === programId) {
       setFormData(updated);
     }
-    showToast(`Evaluasi untuk "${prog.namaProgram}" berhasil disimpan!`);
+    const monthLabel = monthForSave ? ` Bulan ${monthForSave}` : '';
+    showToast(`Evaluasi${monthLabel} untuk "${prog.namaProgram}" berhasil disimpan!`);
   };
 
   // 3. Filtered programs list based on Tahun, Bulan, Seksi & Hak Akses
@@ -540,14 +663,41 @@ export default function App() {
     showToast(`Program "${progName}" berhasil dihapus.`);
   };
 
-  // Programs in selected year
+  // Base programs for metrics: jika sedang masuk ke Seksi tertentu (login atau filter seksi aktif),
+  // sesuaikan hanya program milik seksi yang bersangkutan saja (bukan program dari seksi lain)
+  const scopedPrograms = useMemo(() => {
+    const activeUnit =
+      authSession?.role === 'seksi'
+        ? authSession.unitNama
+        : selectedSeksi !== 'all'
+        ? selectedSeksi
+        : null;
+
+    if (activeUnit) {
+      return programs.filter((p) => isDivisionMatch(p.penanggungjawab?.divisi, activeUnit));
+    }
+    return programs;
+  }, [programs, authSession, selectedSeksi]);
+
+  // Programs in selected year (scoped to active seksi if selected)
   const programsInSelectedYear = useMemo(() => {
-    return programs.filter((p) =>
+    return scopedPrograms.filter((p) =>
       selectedYear === 'all' ? true : p.tahun === selectedYear
     );
-  }, [programs, selectedYear]);
+  }, [scopedPrograms, selectedYear]);
+
+  // Program milik seksi aktif yang berjalan pada bulan & tahun terpilih (termasuk pelayanan rutin)
+  const prokersInSelectedMonthAndYear = useMemo(() => {
+    return programsInSelectedYear.filter((p) => {
+      if (selectedMonth !== 'all') {
+        return p.bulanPelaksanaan?.includes(selectedMonth) || isPelayananRutin(p);
+      }
+      return true;
+    });
+  }, [programsInSelectedYear, selectedMonth]);
 
   // Month counts calculation for month filter tabs (termasuk pelayanan rutin yang berjalan tiap bulan)
+  // Jumlah program di setiap bulan kini sepenuhnya disesuaikan dengan seksi yang aktif
   const monthCounts = useMemo(() => {
     return BULAN_LIST.map((m) => {
       const count = programsInSelectedYear.filter(
@@ -559,7 +709,8 @@ export default function App() {
 
   // Active divisions with proker count in selected month
   const activeSeksiInSelectedMonth = useMemo(() => {
-    const activeInMonth = programsInSelectedYear.filter((p) => {
+    const activeInMonth = programs.filter((p) => {
+      if (selectedYear !== 'all' && p.tahun !== selectedYear) return false;
       if (selectedMonth !== 'all') {
         return p.bulanPelaksanaan?.includes(selectedMonth) || isPelayananRutin(p);
       }
@@ -573,23 +724,7 @@ export default function App() {
         count,
       };
     }).filter((item) => item.count > 0);
-  }, [programsInSelectedYear, selectedMonth]);
-
-  // Auto-reset selectedSeksi jika seksi/DPPH tidak memiliki program di bulan yang baru dipilih
-  // Catatan: Jangan me-reset jika user login sebagai unit seksi tertentu agar pilihan tetap konsisten
-  useEffect(() => {
-    if (authSession?.role === 'seksi') {
-      return;
-    }
-    if (selectedSeksi !== 'all') {
-      const isAvailable = activeSeksiInSelectedMonth.some(
-        (item) => isDivisionMatch(item.division.nama, selectedSeksi)
-      );
-      if (!isAvailable) {
-        setSelectedSeksi('all');
-      }
-    }
-  }, [selectedMonth, activeSeksiInSelectedMonth, selectedSeksi, authSession]);
+  }, [programs, selectedYear, selectedMonth]);
 
   // Overall budget summary
   const totalAnggaran = useMemo(() => {
@@ -616,9 +751,9 @@ export default function App() {
         className={`w-full bg-slate-50 min-h-screen flex flex-col relative transition-all ${
           isMobileDeviceFrame
             ? 'max-w-[430px] rounded-[36px] shadow-2xl border-4 border-slate-300 overflow-hidden min-h-[850px]'
-            : activeTab === 'dashboard'
-            ? 'w-full max-w-5xl lg:max-w-6xl mx-auto shadow-sm'
-            : 'w-full max-w-xl md:max-w-2xl mx-auto shadow-sm'
+            : activeTab === 'dashboard' || activeTab === 'pengurus'
+            ? 'w-full max-w-5xl lg:max-w-7xl mx-auto shadow-sm'
+            : 'w-full max-w-3xl lg:max-w-4xl mx-auto shadow-sm'
         }`}
       >
         {/* Device Status Bar Simulation */}
@@ -634,34 +769,47 @@ export default function App() {
         )}
 
         {/* 1. HEADER (1 Layar) */}
-        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 sm:px-4 pt-2 pb-2 space-y-1.5">
-          {/* Top Brand & Actions - Memanjang di Mobile dengan Tombol Kompak di Baris Bawah */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-2">
-            {/* Bagian Judul: Dibuat Memanjang Penuh di Mobile */}
-            <div className="flex items-center gap-2 min-w-0 w-full">
-              <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
-                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 sm:px-4 pt-2 pb-2 space-y-1.5 print:hidden">
+          {/* Baris 1: Judul Nama Paroki Memanjang Penuh ke Samping (Horizontal) */}
+          <div className="flex items-center justify-between gap-2.5 pb-1 border-b border-slate-100">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400" />
               </div>
-              <div className="min-w-0 flex-1">
-                <h1 className="text-[11px] sm:text-xs md:text-sm font-extrabold text-slate-900 leading-snug break-words">
-                  Program Kerja Paroki St Perawan Maria Yang Dikandung Tanpa Noda Katedral Keuskupan Agung Medan
+              <div className="min-w-0 flex-1 overflow-x-auto no-scrollbar py-0.5">
+                <h1 className="text-xs sm:text-[13px] md:text-sm lg:text-[14.5px] font-black text-slate-900 whitespace-nowrap tracking-tight">
+                  Program Kerja Paroki St. Perawan Maria Yang Dikandung Tanpa Noda Katedral Keuskupan Agung Medan
                 </h1>
-                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                  <p className="text-[9px] sm:text-[10px] text-emerald-700 font-bold">
-                    {selectedYear === 'all'
-                      ? 'Tahun Anggaran 2026 & 2027'
-                      : `Tahun Anggaran ${selectedYear}`}
-                  </p>
-                  <span className="inline-flex items-center gap-1 text-[8.5px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded-full border border-emerald-200">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Cloud Synced
-                  </span>
-                </div>
               </div>
             </div>
 
+            {/* Badge Tahun & Status Cloud di Samping Kanan Judul */}
+            <div className="hidden sm:flex items-center gap-2 shrink-0 text-[10px]">
+              <span className="text-emerald-800 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 whitespace-nowrap">
+                {selectedYear === 'all'
+                  ? 'Tahun Anggaran 2026 & 2027'
+                  : `Tahun Anggaran ${selectedYear}`}
+              </span>
+              <span className="inline-flex items-center gap-1 text-[8.5px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200 whitespace-nowrap">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                Cloud Synced
+              </span>
+            </div>
+          </div>
+
+          {/* Baris 2: Sub-info Mobile & Menu Aksi */}
+          <div className="flex items-center justify-between gap-1.5 flex-wrap sm:flex-nowrap pt-0.5">
+            {/* Mobile Sub Info */}
+            <div className="flex sm:hidden items-center gap-1.5 text-[9px]">
+              <span className="text-emerald-800 font-bold">
+                {selectedYear === 'all' ? 'T.A. 2026 & 2027' : `T.A. ${selectedYear}`}
+              </span>
+              <span className="text-slate-300">•</span>
+              <span className="text-emerald-700 font-semibold">Cloud Synced</span>
+            </div>
+
             {/* Menu Aksi: Jika belum login, HANYA tombol Login PIN */}
-            <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0 flex-wrap sm:flex-nowrap">
+            <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0 flex-wrap sm:flex-nowrap sm:ml-auto">
               {/* Session / Lock Indicator Badge & Login / Logout in Header */}
               {authSession ? (
                 <>
@@ -696,15 +844,23 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Export / Download CSV Button */}
+                  {/* Download PDF Laporan (Landscape A4 dengan Diagram) */}
                   <button
                     type="button"
-                    onClick={() => exportToCSV(programs)}
-                    className="flex-1 sm:flex-none h-7 px-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-[10px] font-bold text-slate-700 flex items-center justify-center gap-1 transition-colors shadow-2xs"
-                    title="Unduh Data ke CSV / Excel"
+                    onClick={() => setIsPdfModalOpen(true)}
+                    className="flex-1 sm:flex-none h-7 px-2.5 rounded-md border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[10px] font-bold text-emerald-900 flex items-center justify-center gap-1 transition-colors shadow-2xs cursor-pointer"
+                    title={
+                      authSession.role === 'pastor_paroki' || authSession.role === 'semua_seksi'
+                        ? 'Download PDF Laporan Keseluruhan Seluruh Seksi (Landscape & Diagram)'
+                        : `Download PDF Laporan Program ${selectedSeksi !== 'all' ? selectedSeksi : authSession.unitNama} (Landscape & Diagram)`
+                    }
                   >
-                    <Download className="w-3 h-3 text-slate-600" />
-                    <span>Download</span>
+                    <Download className="w-3 h-3 text-emerald-700" />
+                    <span>
+                      {authSession.role === 'pastor_paroki' || authSession.role === 'semua_seksi'
+                        ? 'Download PDF (Keseluruhan)'
+                        : `Download PDF (${selectedSeksi !== 'all' ? selectedSeksi.replace('Seksi ', '') : authSession.unitNama.replace('Seksi ', '')})`}
+                    </span>
                   </button>
 
                   {/* Input Program per Seksi Button */}
@@ -730,21 +886,37 @@ export default function App() {
                   </button>
                 </>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('dashboard');
-                    setUnlockTarget({
-                      unitId: 'all',
-                      unitNama: 'Semua Unit',
-                    });
-                  }}
-                  className="h-7.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] flex items-center gap-1.5 shadow-2xs transition-all active:scale-95 cursor-pointer"
-                  title="Masuk / Login dengan PIN angka untuk membuka data"
-                >
-                  <Lock className="w-3.5 h-3.5 text-emerald-100" />
-                  <span>Login PIN</span>
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(activeTab === 'pengurus' ? 'dashboard' : 'pengurus')}
+                    className={`h-7 px-2.5 rounded-md border text-[10.5px] font-bold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer ${
+                      activeTab === 'pengurus'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
+                    }`}
+                    title="Lihat Susunan Pengurus Paroki, Pastor, DPPH, Seksi & Anggota"
+                  >
+                    <Users className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Pengurus Paroki</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('dashboard');
+                      setUnlockTarget({
+                        unitId: 'all',
+                        unitNama: 'Semua Unit',
+                      });
+                    }}
+                    className="h-7 px-2.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10.5px] flex items-center gap-1.5 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                    title="Masuk / Login dengan PIN angka untuk membuka data"
+                  >
+                    <Lock className="w-3 h-3 text-emerald-100" />
+                    <span>Login PIN</span>
+                  </button>
+                </div>
               )}
 
               {/* Toggle HP Frame mode on desktop */}
@@ -766,31 +938,43 @@ export default function App() {
           {/* TAB NAVIGASI & KONTROL FILTER: HANYA DITAMPILKAN SETELAH LOGIN */}
           {authSession && (
             <>
-              {/* TAB NAVIGASI: DASHBOARD vs INPUT & DETAIL PROGRAM */}
+              {/* TAB NAVIGASI: DASHBOARD vs INPUT & DETAIL vs STRUKTUR PENGURUS */}
               <div className="flex items-center p-0.5 bg-slate-200/80 rounded-lg">
                 <button
                   type="button"
                   onClick={() => setActiveTab('dashboard')}
-                  className={`flex-1 py-1.5 px-3 rounded-md text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                  className={`flex-1 py-1.5 px-2 rounded-md text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition-all ${
                     activeTab === 'dashboard'
                       ? 'bg-white text-slate-900 shadow-2xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   <LayoutDashboard className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Dashboard Program</span>
+                  <span>Dashboard</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab('input')}
-                  className={`flex-1 py-1.5 px-3 rounded-md text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                  className={`flex-1 py-1.5 px-2 rounded-md text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition-all ${
                     activeTab === 'input'
                       ? 'bg-white text-slate-900 shadow-2xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   <FileText className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Input & Detail Program</span>
+                  <span>Input Proker</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('pengurus')}
+                  className={`flex-1 py-1.5 px-2 rounded-md text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+                    activeTab === 'pengurus'
+                      ? 'bg-white text-slate-900 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Pengurus Paroki</span>
                 </button>
               </div>
 
@@ -867,22 +1051,32 @@ export default function App() {
                     onChange={(e) => handleSelectSeksiWithAuth(e.target.value)}
                     className="w-full h-7.5 bg-white border border-slate-300 rounded-lg pl-2 pr-6 text-[10.5px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
                     title="Pilih DPPH atau Seksi Tertentu"
+                    disabled={authSession?.role === 'seksi'}
                   >
-                    <option value="all">
-                      Semua Unit (DPPH & 15 Seksi) ({activeSeksiInSelectedMonth.length} aktif)
-                    </option>
-                    {/* DPPH di urutan pertama, lalu 15 Seksi */}
-                    {MASTER_DIVISIONS.map((div) => {
-                      const activeItem = activeSeksiInSelectedMonth.find((item) =>
-                        isDivisionMatch(item.division.nama, div.nama)
-                      );
-                      const count = activeItem ? activeItem.count : 0;
-                      return (
-                        <option key={div.id} value={div.nama}>
-                          {div.code === 'DPPH' ? '🏛️ ' : ''}{div.nama} ({count} proker)
+                    {/* Jika login sebagai seksi tertentu, hanya tampilkan seksi yang bersangkutan dengan jumlah proker sesuai bulan terpilih */}
+                    {authSession?.role === 'seksi' ? (
+                      <option value={authSession.unitNama}>
+                        {authSession.unitNama} ({prokersInSelectedMonthAndYear.length} proker)
+                      </option>
+                    ) : (
+                      <>
+                        <option value="all">
+                          Semua Unit (DPPH & 15 Seksi)
                         </option>
-                      );
-                    })}
+                        {MASTER_DIVISIONS.map((div) => {
+                          const isCurrentActive = isDivisionMatch(selectedSeksi, div.nama);
+                          // Sesuai aturan: jika sedang masuk ke seksi tertentu, jangan tampilkan jumlah proker seksi lain.
+                          // Hanya tampilkan jumlah proker untuk seksi yang sedang aktif/dipilih sesuai bulan terpilih.
+                          const showCount = selectedSeksi !== 'all' && isCurrentActive;
+
+                          return (
+                            <option key={div.id} value={div.nama}>
+                              {div.code === 'DPPH' ? '🏛️ ' : ''}{div.nama}{showCount ? ` (${prokersInSelectedMonthAndYear.length} proker)` : ''}
+                            </option>
+                          );
+                        })}
+                      </>
+                    )}
                   </select>
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[9px]">
                     ▼
@@ -943,20 +1137,27 @@ export default function App() {
                     onChange={(e) => handleSelectSeksiWithAuth(e.target.value)}
                     className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
                     title="Filter Berdasarkan DPPH / Seksi"
+                    disabled={authSession?.role === 'seksi'}
                   >
-                    <option value="all">Semua DPPH & Seksi</option>
-                    {DAFTAR_DIVISI.map((div) => {
-                      const count = programs.filter(
-                        (p) =>
-                          isDivisionMatch(p.penanggungjawab?.divisi, div) &&
-                          (selectedYear === 'all' || p.tahun === selectedYear)
-                      ).length;
-                      return (
-                        <option key={div} value={div}>
-                          {div} {count > 0 ? `(${count})` : ''}
-                        </option>
-                      );
-                    })}
+                    {authSession?.role === 'seksi' ? (
+                      <option value={authSession.unitNama}>
+                        {authSession.unitNama} ({prokersInSelectedMonthAndYear.length})
+                      </option>
+                    ) : (
+                      <>
+                        <option value="all">Semua DPPH & Seksi</option>
+                        {DAFTAR_DIVISI.map((div) => {
+                          const isCurrentActive = isDivisionMatch(selectedSeksi, div);
+                          const showCount = selectedSeksi !== 'all' && isCurrentActive;
+
+                          return (
+                            <option key={div} value={div}>
+                              {div}{showCount ? ` (${prokersInSelectedMonthAndYear.length})` : ''}
+                            </option>
+                          );
+                        })}
+                      </>
+                    )}
                   </select>
                   <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
                 </div>
@@ -1026,7 +1227,7 @@ export default function App() {
     </header>
 
         {/* 4. MAIN BODY: DASHBOARD ATAU FORM INPUT & DETAIL PROGRAM */}
-        <main className="flex-1 px-3 sm:px-4 py-3 pb-24 overflow-y-auto space-y-4">
+        <main className="flex-1 px-3 sm:px-4 py-3 pb-24 overflow-y-auto space-y-4 print:hidden">
           {activeTab === 'dashboard' ? (
             <ErrorBoundary>
               <DashboardView
@@ -1044,14 +1245,31 @@ export default function App() {
                 onInputProgramForSeksi={(seksiName) => {
                   handleCreateProgramForSeksi(seksiName, getDefaultPicForDivisi(seksiName));
                 }}
-                onOpenEvaluasi={(prog) => {
+                onOpenEvaluasi={(prog, targetMonth) => {
                   setEvaluatingProgram(prog);
+                  setEvaluatingMonth(targetMonth || (typeof selectedMonth === 'number' ? selectedMonth : 10));
                 }}
                 authSession={authSession}
                 onAuthenticate={handleAuthenticate}
                 onLockDashboard={handleLockDashboard}
                 onOpenPinManager={() => setIsPinManagerOpen(true)}
                 onPromptUnlockUnit={(unitId, unitNama) => setUnlockTarget({ unitId, unitNama })}
+                onOpenPdfModal={() => setIsPdfModalOpen(true)}
+                onOpenPengurusTab={() => setActiveTab('pengurus')}
+              />
+            </ErrorBoundary>
+          ) : activeTab === 'pengurus' ? (
+            <ErrorBoundary>
+              <PengurusView
+                pengurusList={pengurusList}
+                authSession={authSession}
+                onSavePengurus={handleSavePengurus}
+                onDeletePengurus={handleDeletePengurus}
+                onResetDefaultPengurus={handleResetPengurus}
+                masterJabatanList={masterJabatanList}
+                onSaveJabatan={handleSaveJabatan}
+                onDeleteJabatan={handleDeleteJabatan}
+                onResetDefaultJabatan={handleResetJabatan}
               />
             </ErrorBoundary>
           ) : !authSession ? (
@@ -1780,8 +1998,54 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Ringkasan jika evaluasi sudah diisi */}
-                  {formData.evaluasi?.statusKeterlaksanaan && (
+                  {/* Ringkasan jika evaluasi sudah diisi (Mendukung evaluasi per bulan dan single) */}
+                  {formData.evaluasiBulanan && Object.keys(formData.evaluasiBulanan).length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                        <span>Realisasi Evaluasi Bulanan ({Object.keys(formData.evaluasiBulanan).length} Bulan Diisi):</span>
+                        <span className="text-emerald-800">
+                          Total Terpakai: {formatRupiah(Object.values(formData.evaluasiBulanan).reduce((s, ev) => s + (ev.anggaranTerpakai || 0), 0))}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">
+                        {Object.entries(formData.evaluasiBulanan).map(([mStr, ev]) => {
+                          const mNo = parseInt(mStr, 10);
+                          const bObj = BULAN_LIST[mNo - 1];
+                          const isTerlaksana = ev.statusKeterlaksanaan === 'terlaksana';
+
+                          return (
+                            <div
+                              key={mStr}
+                              className="p-2 rounded-lg bg-white border border-slate-200 text-[10.5px] space-y-0.5 shadow-2xs"
+                            >
+                              <div className="flex items-center justify-between font-bold">
+                                <span className="text-slate-800">Bulan {bObj?.nama}:</span>
+                                <span
+                                  className={`px-1.5 py-0.2 rounded text-[9px] ${
+                                    isTerlaksana
+                                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                      : 'bg-rose-50 text-rose-800 border border-rose-200'
+                                  }`}
+                                >
+                                  {isTerlaksana ? '✓ Terlaksana' : ev.statusKeterlaksanaan === 'perubahan_waktu' ? '⏳ Geser' : '✕ Batal'}
+                                </span>
+                              </div>
+                              {isTerlaksana && ev.anggaranTerpakai !== undefined && (
+                                <p className="text-emerald-800 font-semibold">
+                                  Biaya: {formatRupiah(ev.anggaranTerpakai)}
+                                </p>
+                              )}
+                              {ev.penjelasanKegiatan && (
+                                <p className="text-slate-500 line-clamp-1 italic">
+                                  "{ev.penjelasanKegiatan}"
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : formData.evaluasi?.statusKeterlaksanaan ? (
                     <div className="p-2.5 rounded-xl bg-white border border-amber-200 text-[11px] text-slate-700 space-y-1">
                       {formData.evaluasi.statusKeterlaksanaan === 'terlaksana' ? (
                         <>
@@ -1815,7 +2079,7 @@ export default function App() {
                         </p>
                       )}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
@@ -1880,7 +2144,7 @@ export default function App() {
 
         {/* 5. FIXED BOTTOM STICKY BAR: PREV / NEXT NAVIGATION (Hanya saat tab Input / Detail aktif) */}
         {activeTab === 'input' && (
-          <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-lg">
+          <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-lg print:hidden">
             <div className="max-w-xl md:max-w-2xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
               <button
                 type="button"
@@ -1942,7 +2206,11 @@ export default function App() {
         <EvaluasiModal
           isOpen={!!evaluatingProgram}
           program={evaluatingProgram}
-          onClose={() => setEvaluatingProgram(null)}
+          selectedMonth={evaluatingMonth || (typeof selectedMonth === 'number' ? selectedMonth : 10)}
+          onClose={() => {
+            setEvaluatingProgram(null);
+            setEvaluatingMonth(undefined);
+          }}
           onSaveEvaluasi={handleSaveEvaluasi}
         />
 
@@ -1967,10 +2235,23 @@ export default function App() {
               } else {
                 setSelectedSeksi('all');
               }
+              setActiveTab('dashboard');
               showToast(`Data untuk ${newSession.unitNama} berhasil dibuka!`);
             }}
           />
         )}
+
+        {/* Modal Download PDF Laporan Landscape dengan Diagram Capaian & Penggunaan Dana */}
+        <DownloadPdfModal
+          isOpen={isPdfModalOpen}
+          onClose={() => setIsPdfModalOpen(false)}
+          programs={programs}
+          authSession={authSession}
+          selectedSeksi={selectedSeksi}
+          selectedYear={selectedYear}
+          selectedMonth={selectedMonth}
+          pengurusList={pengurusList}
+        />
       </div>
     </div>
     </ErrorBoundary>
