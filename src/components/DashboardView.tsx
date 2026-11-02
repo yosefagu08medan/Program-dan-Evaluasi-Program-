@@ -32,6 +32,8 @@ import {
   ShieldCheck,
   RotateCcw,
   Download,
+  ArrowRight,
+  Wallet,
 } from 'lucide-react';
 import { ProgramKerja } from '../types/proker';
 import { AuthSession } from '../types/auth';
@@ -48,6 +50,8 @@ import {
   getEvaluasiForMonth,
   getAnggaranTerpakaiSebelumBulan,
   getSisaBudgetUntukBulan,
+  getKategoriProgramInfo,
+  getAlokasiBudgetBulanan,
 } from '../utils/formatters';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
 
@@ -62,6 +66,7 @@ interface DashboardViewProps {
   onOpenProgramDetail: (programId: string) => void;
   onInputProgramForSeksi: (seksiName: string) => void;
   onOpenEvaluasi: (program: ProgramKerja, targetMonth?: number) => void;
+  onInputProgramLuarRancangan?: (seksiName?: string) => void;
   authSession: AuthSession | null;
   onAuthenticate: (session: AuthSession) => void;
   onLockDashboard: () => void;
@@ -69,6 +74,10 @@ interface DashboardViewProps {
   onPromptUnlockUnit?: (unitId: string, unitNama: string) => void;
   onOpenPdfModal?: () => void;
   onOpenPengurusTab?: () => void;
+  onOpenKomparasiTab?: () => void;
+  onOpenCashFlowTab?: () => void;
+  onOpenPenerimaanTab?: () => void;
+  onOpenDualPlanningForSeksi?: (seksiName: string) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -82,6 +91,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenProgramDetail,
   onInputProgramForSeksi,
   onOpenEvaluasi,
+  onInputProgramLuarRancangan,
   authSession,
   onAuthenticate,
   onLockDashboard,
@@ -89,6 +99,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onPromptUnlockUnit,
   onOpenPdfModal,
   onOpenPengurusTab,
+  onOpenKomparasiTab,
+  onOpenCashFlowTab,
+  onOpenPenerimaanTab,
+  onOpenDualPlanningForSeksi,
 }) => {
   // Bulan berjalan default (1 - 12) berdasarkan kalender saat ini
   const currentCalendarMonth = new Date().getMonth() + 1;
@@ -263,6 +277,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return counts;
   }, [allActiveProgramsInView]);
 
+  const luarRancanganCount = useMemo(() => {
+    return allActiveProgramsInView.filter((p) => !!p.isLuarRancangan).length;
+  }, [allActiveProgramsInView]);
+
   const selectedMonthObj = typeof selectedMonth === 'number' ? BULAN_LIST[selectedMonth - 1] : null;
 
   const getSeksiIcon = (code: string) => {
@@ -296,7 +314,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       case 'SEK-KATEKESE':
         return <BookKey className="w-4 h-4 text-amber-700" />;
       case 'SEK-PLBKS':
-        return <TreePine className="w-4 h-4 text-emerald-700" />;
+        return <Sparkles className="w-4 h-4 text-amber-600" />;
       case 'SEK-KERAWAM':
         return <Award className="w-4 h-4 text-red-600" />;
       default:
@@ -410,6 +428,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             >
               <Building2 className="w-3 h-3 text-slate-500" />
               <span>Ganti Seksi</span>
+            </button>
+          )}
+
+          {/* Komparasi 2026-2027 (DPPH & Seksi) button */}
+          {onOpenKomparasiTab && (
+            <button
+              type="button"
+              onClick={onOpenKomparasiTab}
+              className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 text-[10.5px] font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+              title="Buka Menu Komparasi Evaluasi 2026 vs Rancangan 2027 per Seksi"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-indigo-700" />
+              <span>Komparasi DPPH (2026-2027)</span>
+            </button>
+          )}
+
+          {/* Proyeksi Kas Bulanan button */}
+          {onOpenCashFlowTab && (
+            <button
+              type="button"
+              onClick={onOpenCashFlowTab}
+              className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-200 text-[10.5px] font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+              title="Buka Dashboard Proyeksi Kebutuhan Kas Bulanan Paroki"
+            >
+              <DollarSign className="w-3.5 h-3.5 text-teal-700" />
+              <span>Proyeksi Kas Bulanan</span>
+            </button>
+          )}
+
+          {/* Penerimaan Kas Mingguan button */}
+          {onOpenPenerimaanTab && (
+            <button
+              type="button"
+              onClick={onOpenPenerimaanTab}
+              className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10.5px] font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+              title="Buka Menu Penerimaan Kas Mingguan (Rancangan & Realisasi)"
+            >
+              <Wallet className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Penerimaan Kas (Mingguan)</span>
             </button>
           )}
 
@@ -544,6 +601,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     const evBulanIni = getEvaluasiForMonth(p, reminderMonth);
                     const hasEvaluasi = !!evBulanIni?.statusKeterlaksanaan;
                     const sisaBudget = getSisaBudgetUntukBulan(p, reminderMonth);
+                    const katInfo = getKategoriProgramInfo(p.kategoriProgram);
+                    const alokasiBulanIni = getAlokasiBudgetBulanan(p, reminderMonth);
+                    const catatanBulanIni = p.catatanBulanan?.[reminderMonth];
 
                     return (
                       <div
@@ -555,11 +615,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         }`}
                       >
                         <div>
-                          {/* Header item: Jadwal & Status Evaluasi badge */}
+                          {/* Header item: Jadwal & Status Evaluasi badge & Klasifikasi */}
                           <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                            <span className="text-[9.5px] font-bold text-slate-500">
-                              🗓 {formattedDate}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[9.5px] font-bold text-slate-500">
+                                🗓 {formattedDate}
+                              </span>
+                              <span className={`px-1.5 py-0.2 rounded border text-[9px] font-bold inline-flex items-center gap-0.5 ${katInfo.badge}`}>
+                                <span>{katInfo.iconEmoji}</span>
+                                <span>{katInfo.label}</span>
+                              </span>
+                            </div>
                             {hasEvaluasi ? (
                               evBulanIni?.statusKeterlaksanaan === 'terlaksana' ? (
                                 <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-extrabold flex items-center gap-1 shadow-2xs">
@@ -592,7 +658,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <div className="flex items-center gap-2 text-[10.5px] text-slate-500 mt-1 flex-wrap">
                             <span>Pagu Awal: <strong className="text-slate-800">{formatRupiah(p.estimasiAnggaran)}</strong></span>
                             <span>•</span>
-                            <span>Sisa Budget Bulan Ini: <strong className="text-emerald-800 font-extrabold">{formatRupiah(sisaBudget)}</strong></span>
+                            <span>Alokasi Bln Ini: <strong className="text-slate-800">{formatRupiah(alokasiBulanIni)}</strong></span>
+                            <span>•</span>
+                            <span>Sisa Budget: <strong className="text-emerald-800 font-extrabold">{formatRupiah(sisaBudget)}</strong></span>
                             {evBulanIni?.tempatPelaksanaan && (
                               <>
                                 <span>•</span>
@@ -600,6 +668,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               </>
                             )}
                           </div>
+
+                          {/* Catatan Rencana Khusus Bulan Ini jika ada (misal: Pembentukan Panitia / Pencairan Dana) */}
+                          {catatanBulanIni && (
+                            <div className="mt-1.5 p-2 rounded-lg bg-indigo-50/80 border border-indigo-200 text-[10.5px] text-indigo-950 flex items-start gap-1.5">
+                              <span className="font-extrabold text-indigo-700 shrink-0">📝 Note Bln {BULAN_LIST[reminderMonth - 1]?.singkatan}:</span>
+                              <span className="font-medium">{catatanBulanIni}</span>
+                            </div>
+                          )}
 
                           {/* Catatan hasil evaluasi jika sudah ada */}
                           {evBulanIni?.penjelasanKegiatan && (
@@ -812,7 +888,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               ? `${statusCounts.sudahDievaluasi} Terlaksana & Sudah Dievaluasi`
               : `${statusCounts.berlangsung} Sedang Berjalan`}
           </p>
+          {luarRancanganCount > 0 && (
+            <div className="mt-1 pt-1 border-t border-slate-100 flex items-center gap-1">
+              <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5">
+                <Sparkles className="w-2.5 h-2.5 text-amber-700" />
+                <span>{luarRancanganCount} Luar Rancangan</span>
+              </span>
+            </div>
+          )}
         </div>
+      </div>
+
+      {/* 2B. BANNER KHUSUS PROGRAM TERLAKSANA DI LUAR RANCANGAN (INSIDENTAL) */}
+      <div className="bg-gradient-to-r from-amber-50/90 via-orange-50/70 to-amber-50/90 border border-amber-200/90 p-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/40 text-amber-700 flex items-center justify-center font-bold shrink-0 shadow-xs">
+            <Sparkles className="w-4 h-4 text-amber-600" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h4 className="text-xs font-black text-amber-950">
+                Program Terlaksana di Luar Rancangan Awal
+              </h4>
+              <span className="text-[9.5px] font-extrabold px-1.5 py-0.2 rounded-full bg-amber-200 text-amber-900">
+                {luarRancanganCount} Kegiatan Terlaksana
+              </span>
+            </div>
+            <p className="text-[10.5px] text-amber-900/80 mt-0.5">
+              Kegiatan tambahan insidental yang terlaksana untuk kebutuhan umat paroki tanpa masuk buku rancangan awal.
+            </p>
+          </div>
+        </div>
+
+        {onInputProgramLuarRancangan && (
+          <button
+            type="button"
+            onClick={() => onInputProgramLuarRancangan(selectedSeksi !== 'all' ? selectedSeksi : undefined)}
+            className="self-end sm:self-auto px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+            title="Tambah program yang terlaksana namun tidak masuk dalam rancangan awal (insidental)"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>+ Program Luar Rancangan</span>
+          </button>
+        )}
       </div>
 
       {/* 2. TAMPILAN PROGRAM KERJA & PELAYANAN RUTIN PER UNIT (DPPH & 15 SEKSI - MODEL SAMA PERSIS) */}
@@ -881,6 +999,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border bg-emerald-600 text-white border-emerald-600 shadow-2xs">
                         {count} Proker
                       </span>
+                      {onInputProgramLuarRancangan && (
+                        <button
+                          type="button"
+                          onClick={() => onInputProgramLuarRancangan(division.nama)}
+                          className="h-7 px-2 rounded-md bg-amber-50 border border-amber-300 hover:bg-amber-100 text-amber-900 flex items-center justify-center gap-1 shadow-2xs transition-colors text-[10px] font-bold cursor-pointer"
+                          title={`Input Kegiatan di Luar Rancangan (Insidental) untuk ${division.nama}`}
+                        >
+                          <Sparkles className="w-3 h-3 text-amber-700" />
+                          <span className="hidden md:inline">+ Luar Rancangan</span>
+                        </button>
+                      )}
+                      {onOpenDualPlanningForSeksi && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenDualPlanningForSeksi(division.nama)}
+                          className="h-7 px-2 rounded-md bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-900 flex items-center justify-center gap-1 shadow-2xs transition-colors text-[10px] font-bold cursor-pointer"
+                          title={`Buka Lembar Kerja Perancangan 2 Sisi (2026 vs 2027) untuk ${division.nama}`}
+                        >
+                          <ArrowRight className="w-3 h-3 text-indigo-600" />
+                          <span className="hidden md:inline">Rancang 2 Sisi</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => onInputProgramForSeksi(division.nama)}
@@ -914,6 +1054,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           const formattedDate = targetDate ? formatIndonesianDate(targetDate) : 'Sesuai Jadwal';
                           const evBulanIni = getEvaluasiForMonth(p, targetMonth);
                           const sisaBudget = getSisaBudgetUntukBulan(p, targetMonth);
+                          const katInfo = getKategoriProgramInfo(p.kategoriProgram);
+                          const catatanBulanIni = p.catatanBulanan?.[targetMonth];
+                          const alokasiBulanIni = getAlokasiBudgetBulanan(p, targetMonth);
 
                           return (
                             <div
@@ -929,6 +1072,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                   <span className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded border ${getStatusInfo(p.status).color}`}>
                                     {getStatusInfo(p.status).label}
                                   </span>
+                                  <span className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded border ${katInfo.badge}`}>
+                                    <span>{katInfo.iconEmoji}</span> {katInfo.label}
+                                  </span>
+                                  {p.isLuarRancangan && (
+                                    <span className="text-[8.5px] font-black px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5 shadow-2xs">
+                                      <Sparkles className="w-2.5 h-2.5 text-amber-700" />
+                                      <span>Luar Rancangan</span>
+                                    </span>
+                                  )}
                                   {evBulanIni?.statusKeterlaksanaan === 'terlaksana' && (
                                     <span className="text-[8.5px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-0.5 shadow-2xs">
                                       <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
@@ -953,10 +1105,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                   <span>🗓 {formattedDate}</span>
                                   <span>•</span>
                                   <span>Pagu: {formatRupiah(p.estimasiAnggaran)}</span>
+                                  {alokasiBulanIni > 0 && (
+                                    <>
+                                      <span>•</span>
+                                      <span>Alokasi Bln Ini: <strong className="text-slate-800">{formatRupiah(alokasiBulanIni)}</strong></span>
+                                    </>
+                                  )}
                                   <span>•</span>
                                   <span className="font-extrabold text-emerald-800">
                                     Sisa: {formatRupiah(sisaBudget)}
                                   </span>
+                                  {catatanBulanIni && (
+                                    <span className="text-[9.5px] text-indigo-800 bg-indigo-50 border border-indigo-200 px-1 py-0.2 rounded font-medium">
+                                      Note: {catatanBulanIni}
+                                    </span>
+                                  )}
                                 </div>
                               </button>
 

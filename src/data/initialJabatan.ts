@@ -93,36 +93,12 @@ export const INITIAL_MASTER_JABATAN: MasterJabatan[] = [
     urutan: 15,
   },
   {
-    id: 'jab-dpph-ang-pewartaan',
-    nama: 'Anggota DPPH (Bidang Pewartaan)',
+    id: 'jab-dpph-anggota',
+    nama: 'Anggota DPPH',
     kategori: 'dpph',
-    keterangan: 'Pendamping seksi liturgi, katekese, kks, dan kki',
+    keterangan: 'Anggota Dewan Pastoral Paroki Harian (DPPH)',
     isDefault: true,
     urutan: 16,
-  },
-  {
-    id: 'jab-dpph-ang-kemasyarakatan',
-    nama: 'Anggota DPPH (Bidang Kemasyarakatan)',
-    kategori: 'dpph',
-    keterangan: 'Pendamping seksi PSE, HAK, Kerawam, dan PLBKS',
-    isDefault: true,
-    urutan: 17,
-  },
-  {
-    id: 'jab-dpph-ang-pembinaan',
-    nama: 'Anggota DPPH (Bidang Pembinaan & Keluarga)',
-    kategori: 'dpph',
-    keterangan: 'Pendamping seksi keluarga, kepemudaan (OMK), dan pendidikan',
-    isDefault: true,
-    urutan: 18,
-  },
-  {
-    id: 'jab-dpph-ang-sarpras',
-    nama: 'Anggota DPPH (Sarana Prasarana & Aset)',
-    kategori: 'dpph',
-    keterangan: 'Pendamping seksi umum, keamanan, komsos, dan pemeliharaan gedung',
-    isDefault: true,
-    urutan: 19,
   },
 
   // 3. Koordinator Seksi
@@ -255,5 +231,13 @@ export const INITIAL_MASTER_JABATAN: MasterJabatan[] = [
     keterangan: 'Penyaluran sembako dan bantuan sosial bagi warga pra-sejahtera',
     isDefault: true,
     urutan: 41,
+  },
+  {
+    id: 'jab-ang-plbks',
+    nama: 'Petugas Pelayan Luar Biasa Komuni Suci',
+    kategori: 'anggota_seksi',
+    keterangan: 'Pelayanan pembagian Komuni Kudus pada Perayaan Ekaristi dan kunjungan orang sakit/lansia',
+    isDefault: true,
+    urutan: 42,
   },
 ];

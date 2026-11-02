@@ -137,7 +137,7 @@ export const PengurusView: React.FC<PengurusViewProps> = ({
     if (s.includes('hak')) return <HeartHandshake className="w-4 h-4 text-teal-600" />;
     if (s.includes('pendidikan')) return <GraduationCap className="w-4 h-4 text-cyan-600" />;
     if (s.includes('kitab suci') || s.includes('kks')) return <BookOpen className="w-4 h-4 text-emerald-600" />;
-    if (s.includes('plbks') || s.includes('lingkungan')) return <TreePine className="w-4 h-4 text-emerald-700" />;
+    if (s.includes('plbks') || s.includes('komuni suci') || s.includes('pelayan luar biasa')) return <Sparkles className="w-4 h-4 text-amber-600" />;
     if (s.includes('kerawam')) return <Award className="w-4 h-4 text-red-600" />;
     return <Building2 className="w-4 h-4 text-slate-600" />;
   };

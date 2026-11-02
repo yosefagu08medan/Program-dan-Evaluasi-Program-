@@ -226,6 +226,11 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
               <span className="text-xs text-slate-300 font-semibold truncate">
                 {program.penanggungjawab?.divisi}
               </span>
+              {program.isLuarRancangan && (
+                <span className="text-[9.5px] font-black px-2 py-0.5 rounded-full bg-amber-400 text-slate-950">
+                  ⚡ Di Luar Rancangan (Insidental)
+                </span>
+              )}
             </div>
             <h3 className="text-sm sm:text-base font-extrabold text-white truncate mt-1">
               {program.namaProgram}

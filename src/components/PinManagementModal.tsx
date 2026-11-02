@@ -17,7 +17,7 @@ import {
   Info,
 } from 'lucide-react';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
-import { authPinService, DEFAULT_ADMIN_PIN, DEFAULT_UNIVERSAL_PIN } from '../utils/authPinService';
+import { authPinService, DEFAULT_ADMIN_PIN, DEFAULT_UNIVERSAL_PIN, DEFAULT_BENDAHARA_PIN } from '../utils/authPinService';
 
 interface PinManagementModalProps {
   isOpen: boolean;
@@ -38,8 +38,10 @@ export const PinManagementModal: React.FC<PinManagementModalProps> = ({
   const [customResetPin, setCustomResetPin] = useState(DEFAULT_UNIVERSAL_PIN);
   const [adminPinInput, setAdminPinInput] = useState(config.adminPin);
   const [universalPinInput, setUniversalPinInput] = useState(config.universalPin);
+  const [bendaharaPinInput, setBendaharaPinInput] = useState(config.bendaharaPin || DEFAULT_BENDAHARA_PIN);
   const [showAdminPin, setShowAdminPin] = useState(false);
   const [showUniversalPin, setShowUniversalPin] = useState(false);
+  const [showBendaharaPin, setShowBendaharaPin] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
   const showNotif = (msg: string) => {
@@ -111,6 +113,14 @@ export const PinManagementModal: React.FC<PinManagementModalProps> = ({
     showNotif(`PIN Semua Seksi diperbarui: ${trimmed}`);
   };
 
+  const handleSaveBendaharaPin = () => {
+    const trimmed = bendaharaPinInput.trim();
+    if (!trimmed) return;
+    authPinService.updateBendaharaPin(trimmed);
+    setConfig(authPinService.getConfig());
+    showNotif(`PIN Bendahara Paroki diperbarui: ${trimmed}`);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden">
@@ -152,21 +162,21 @@ export const PinManagementModal: React.FC<PinManagementModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
-          {/* Master PINs Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Master PINs Cards: Pastor Paroki, Bendahara Paroki, Universal */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Card Pastor Paroki / Admin PIN */}
             <div className="p-3 rounded-xl border border-indigo-200 bg-indigo-50/70 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-indigo-700" />
-                  PIN Pastor Paroki / Admin
+                <span className="text-xs font-extrabold text-indigo-950 flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-700" />
+                  Pastor Paroki / Admin
                 </span>
-                <span className="text-[10px] text-indigo-700 font-bold bg-indigo-100 px-1.5 py-0.5 rounded">
-                  Akses Penuh
+                <span className="text-[9.5px] text-indigo-700 font-bold bg-indigo-100 px-1 py-0.2 rounded">
+                  Penuh
                 </span>
               </div>
-              <p className="text-[10.5px] text-slate-600">
-                Digunakan oleh Pastor Paroki / Admin untuk melihat seluruh data dan mereset PIN.
+              <p className="text-[10px] text-slate-600 leading-tight">
+                Melihat seluruh data, susunan pengurus & reset PIN.
               </p>
               <div className="flex items-center gap-1.5">
                 <div className="relative flex-1">
@@ -176,21 +186,65 @@ export const PinManagementModal: React.FC<PinManagementModalProps> = ({
                     pattern="[0-9]*"
                     value={adminPinInput}
                     onChange={(e) => setAdminPinInput(e.target.value.replace(/\D/g, ''))}
-                    className="w-full bg-white border border-indigo-300 rounded-lg px-2.5 py-1 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-white border border-indigo-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-indigo-500"
                   />
                   <button
                     type="button"
                     onClick={() => setShowAdminPin(!showAdminPin)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                   >
-                    {showAdminPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    {showAdminPin ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                   </button>
                 </div>
                 {adminPinInput !== config.adminPin && (
                   <button
                     type="button"
                     onClick={handleSaveAdminPin}
-                    className="px-2.5 py-1 bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-bold rounded-lg shadow-2xs"
+                    className="px-2 py-1 bg-indigo-700 hover:bg-indigo-800 text-white text-[11px] font-bold rounded-lg shadow-2xs"
+                  >
+                    Simpan
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Card Bendahara Paroki PIN */}
+            <div className="p-3 rounded-xl border border-amber-200 bg-amber-50/70 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold text-amber-950 flex items-center gap-1">
+                  <span className="text-amber-700">💰</span>
+                  Bendahara Paroki
+                </span>
+                <span className="text-[9.5px] text-amber-800 font-bold bg-amber-100 px-1 py-0.2 rounded">
+                  Keuangan
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-600 leading-tight">
+                Menginput Kolekte I, Kolekte II, dan penerimaan paroki.
+              </p>
+              <div className="flex items-center gap-1.5">
+                <div className="relative flex-1">
+                  <input
+                    type={showBendaharaPin ? 'text' : 'password'}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={bendaharaPinInput}
+                    onChange={(e) => setBendaharaPinInput(e.target.value.replace(/\D/g, ''))}
+                    className="w-full bg-white border border-amber-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowBendaharaPin(!showBendaharaPin)}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showBendaharaPin ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  </button>
+                </div>
+                {bendaharaPinInput !== (config.bendaharaPin || DEFAULT_BENDAHARA_PIN) && (
+                  <button
+                    type="button"
+                    onClick={handleSaveBendaharaPin}
+                    className="px-2 py-1 bg-amber-700 hover:bg-amber-800 text-white text-[11px] font-bold rounded-lg shadow-2xs"
                   >
                     Simpan
                   </button>
@@ -201,16 +255,16 @@ export const PinManagementModal: React.FC<PinManagementModalProps> = ({
             {/* Card Universal PIN Buka Semua Seksi */}
             <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/70 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
-                  <KeyRound className="w-4 h-4 text-emerald-700" />
-                  PIN Buka Semua Seksi (Universal)
+                <span className="text-xs font-extrabold text-emerald-950 flex items-center gap-1">
+                  <KeyRound className="w-3.5 h-3.5 text-emerald-700" />
+                  Semua Seksi (Universal)
                 </span>
-                <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.5 rounded">
-                  Hak Semua Unit
+                <span className="text-[9.5px] text-emerald-700 font-bold bg-emerald-100 px-1 py-0.2 rounded">
+                  Semua Unit
                 </span>
               </div>
-              <p className="text-[10.5px] text-slate-600">
-                PIN cepat untuk membuka data seluruh seksi & DPPH sekaligus.
+              <p className="text-[10px] text-slate-600 leading-tight">
+                Membuka data seluruh seksi &amp; DPPH sekaligus.
               </p>
               <div className="flex items-center gap-1.5">
                 <div className="relative flex-1">
@@ -220,21 +274,21 @@ export const PinManagementModal: React.FC<PinManagementModalProps> = ({
                     pattern="[0-9]*"
                     value={universalPinInput}
                     onChange={(e) => setUniversalPinInput(e.target.value.replace(/\D/g, ''))}
-                    className="w-full bg-white border border-emerald-300 rounded-lg px-2.5 py-1 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-white border border-emerald-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
                   />
                   <button
                     type="button"
                     onClick={() => setShowUniversalPin(!showUniversalPin)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                   >
-                    {showUniversalPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    {showUniversalPin ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                   </button>
                 </div>
                 {universalPinInput !== config.universalPin && (
                   <button
                     type="button"
                     onClick={handleSaveUniversalPin}
-                    className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg shadow-2xs"
+                    className="px-2 py-1 bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold rounded-lg shadow-2xs"
                   >
                     Simpan
                   </button>

@@ -82,6 +82,27 @@
         }
       },
       "required": ["id", "tahun", "namaProgram", "status"]
+    },
+    "PenerimaanMingguan": {
+      "title": "PenerimaanMingguan",
+      "description": "Catatan penerimaan kas mingguan paroki untuk pendanaan program kerja",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tahun": { "type": "number", "enum": [2026, 2027] },
+        "bulan": { "type": "number", "minimum": 1, "maximum": 12 },
+        "mingguKe": { "type": "number", "minimum": 1, "maximum": 5 },
+        "tanggal": { "type": "string" },
+        "kategori": { "type": "string" },
+        "namaPenerimaan": { "type": "string" },
+        "rancangan": { "type": "number" },
+        "realisasi": { "type": "number" },
+        "alokasiProkerId": { "type": "string" },
+        "alokasiSeksi": { "type": "string" },
+        "keterangan": { "type": "string" },
+        "pencatat": { "type": "string" }
+      },
+      "required": ["id", "tahun", "bulan", "mingguKe", "namaPenerimaan", "rancangan", "realisasi"]
     }
   },
   "firestore": {
@@ -90,6 +111,13 @@
         "$ref": "#/entities/ProgramKerja"
       },
       "description": "Koleksi dokumen program kerja Paroki Katedral Medan"
+    },
+    "/penerimaan_mingguan/{penerimaanId}": {
+      "schema": {
+        "$ref": "#/entities/PenerimaanMingguan"
+      },
+      "description": "Koleksi penerimaan mingguan paroki untuk pembiayaan program kerja"
     }
   }
 }
+

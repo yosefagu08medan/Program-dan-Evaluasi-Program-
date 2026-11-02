@@ -40,6 +40,8 @@ export interface EvaluasiProgram {
   evaluator?: string;
 }
 
+export type KategoriProgram = 'program_biasa' | 'program_rutin' | 'program_tentatif';
+
 export interface EvaluasiBulanan {
   [bulan: number]: EvaluasiProgram; // 1 = Januari, ..., 12 = Desember
 }
@@ -58,8 +60,22 @@ export interface ProgramKerja {
   jadwalBulanan?: Record<number, string>; // Rencana tanggal pelaksanaan untuk tiap bulan (1-12)
   penanggungjawab: PenanggungJawab;
   status: ProgramStatus;
+  // Klasifikasi Jenis Program:
+  kategoriProgram?: KategoriProgram; // 'program_rutin' | 'program_tentatif' | 'program_biasa'
+  // Kustom Alokasi Pemakaian Dana & Catatan Bulanan (misal Panitia Paskah Feb: Rp 0 / Pembentukan Panitia, Mar: Rp 15jt / Pencairan dana):
+  isKustomAlokasiDana?: boolean;
+  alokasiDanaBulanan?: Record<number, number>; // Nominal rencana pemakaian per bulan (1-12)
+  catatanBulanan?: Record<number, string>; // Catatan / rincian kegiatan per bulan pelaksanaan
   evaluasi?: EvaluasiProgram; // Evaluasi tunggal atau fallback
   evaluasiBulanan?: EvaluasiBulanan; // Evaluasi per bulan (1-12) untuk program rutin/berulang
+  isLuarRancangan?: boolean; // True jika kegiatan terlaksana namun tidak masuk dalam rancangan awal (insidental)
+  alasanLuarRancangan?: string; // Alasan/latar belakang program terlaksana di luar rancangan
+  // Integrasi Rancangan 2026 vs 2027 & Evaluasi DPPH:
+  programLanjutanDariId?: string; // ID program 2026 jika program 2027 ini merupakan kelanjutan
+  namaProgram2026Asal?: string; // Nama program 2026 acuan
+  statusKelanjutan2027?: 'dilanjutkan' | 'tidak_dilanjutkan' | 'baru';
+  tindakLanjutKendala?: string; // Solusi atas kendala tahun 2026 untuk perancangan tahun 2027
+  rekomendasiDPPH?: string; // Arahan/catatan evaluasi dari DPPH
   catatan?: string;
   createdAt: string;
   updatedAt: string;
@@ -71,5 +87,7 @@ export interface FilterOptions {
   tipeJadwal: 'all' | ScheduleType;
   status: 'all' | ProgramStatus;
   divisi: 'all' | string;
+  kategoriRancangan?: 'all' | 'rancangan' | 'luar_rancangan';
+  kategoriProgram?: 'all' | KategoriProgram;
   selectedMonth?: number; // 1-12
 }

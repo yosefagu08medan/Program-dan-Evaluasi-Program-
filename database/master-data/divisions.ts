@@ -153,10 +153,10 @@ export const MASTER_DIVISIONS: MasterDivision[] = [
   {
     id: 'div-plbks',
     code: 'SEK-PLBKS',
-    nama: 'PLBKS',
-    defaultPic: 'Koordinator PLBKS',
+    nama: 'PLBKS (Pelayan Luar Biasa Komuni Suci)',
+    defaultPic: 'Koordinator PLBKS (Pelayan Luar Biasa Komuni Suci)',
     kategori: 'PLBKS',
-    deskripsi: 'Pengembangan Lingkungan Hidup, Keadilan, Perdamaian & Tanggap Kebencanaan Paroki',
+    deskripsi: 'Pelayan Luar Biasa Komuni Suci (PLBKS) - Pelayanan penerimaan Komuni Kudus pada perayaan Ekaristi dan pelayanan Komuni orang sakit serta lansia di paroki',
     urutan: 15,
     isActive: true,
   },
@@ -175,7 +175,7 @@ export const MASTER_DIVISIONS: MasterDivision[] = [
 export function getDefaultPicForDivisi(divisiName: string): string {
   const found = MASTER_DIVISIONS.find((d) => d.nama === divisiName);
   if (found && found.defaultPic) return found.defaultPic;
-  if (divisiName === 'PLBKS') return 'Koordinator PLBKS';
+  if (divisiName.includes('PLBKS') || divisiName.includes('Komuni Suci')) return 'Koordinator PLBKS (Pelayan Luar Biasa Komuni Suci)';
   if (divisiName.startsWith('Seksi ')) return `Koordinator ${divisiName}`;
   return `Koordinator ${divisiName}`;
 }

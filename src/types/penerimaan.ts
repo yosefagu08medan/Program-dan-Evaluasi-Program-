@@ -1,0 +1,169 @@
+export type KategoriPenerimaan =
+  | 'kolekte_1'
+  | 'kolekte_2'
+  | 'kolekte_khusus'
+  | 'persembahan_umat'
+  | 'iuran_lingkungan'
+  | 'donatur_spesifik'
+  | 'usaha_dana_seksi'
+  | 'dana_kelolaan'
+  | 'lain_lain';
+
+export type TipeSumberPenerimaan = 'paroki' | 'seksi_tetap' | 'seksi_tentatif';
+
+export interface PenerimaanMingguan {
+  id: string;
+  tahun: 2026 | 2027;
+  bulan: number; // 1 - 12
+  mingguKe: 1 | 2 | 3 | 4 | 5; // Minggu 1-5 dalam bulan
+  tanggal: string; // Format YYYY-MM-DD atau label tanggal kebaktian/misa
+  kategori: KategoriPenerimaan;
+  namaPenerimaan: string; // Contoh: "Kolekte II Misa Mingguan (Alokasi Dana Proker Liturgi & PSE)"
+  rancangan: number; // Target / Proyeksi Anggaran Penerimaan (Rp)
+  realisasi: number; // Dana Riil / Aktual Masuk (Rp)
+  alokasiProkerId?: string; // ID Program Kerja terkait (jika dikhususkan)
+  namaProgramTerkait?: string; // Nama Proker jika tertaut
+  alokasiSeksi?: string; // Seksi penerima alokasi atau 'Umum Paroki'
+  tipeSumber?: TipeSumberPenerimaan; // 'paroki' | 'seksi_tetap' (PSE/KKI) | 'seksi_tentatif'
+  isTentatif?: boolean; // True jika merupakan penerimaan insidental/tentatif seksi
+  keterangan?: string; // Catatan teknis misa / kwitansi / jumlah amplop
+  pencatat?: string; // Nama petugas / bendahara yang menginput (Default: Bendahara Paroki)
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function isSeksiTetap(divisiName?: string): boolean {
+  if (!divisiName) return false;
+  const dLower = divisiName.toLowerCase();
+  return (
+    dLower.includes('pse') ||
+    dLower.includes('kemasyarakatan') ||
+    dLower.includes('kki') ||
+    dLower.includes('karya kepausan')
+  );
+}
+
+export function isDpphOrAdmin(session?: { role?: string; unitId?: string; unitNama?: string } | null): boolean {
+  if (!session) return false;
+  if (
+    session.role === 'pastor_paroki' ||
+    session.role === 'semua_seksi' ||
+    session.role === 'bendahara'
+  ) {
+    return true;
+  }
+  const unitLower = (session.unitNama || '').toLowerCase();
+  const idLower = (session.unitId || '').toLowerCase();
+  return (
+    unitLower.includes('dpph') ||
+    unitLower.includes('dewan pastoral') ||
+    unitLower.includes('dewan paroki') ||
+    unitLower.includes('dewan pengurus') ||
+    unitLower.includes('bendahara') ||
+    idLower.includes('dpph') ||
+    idLower.includes('bendahara')
+  );
+}
+
+// Aturan Pembagian 50:50 Kolekte I:
+// 50% masuk sebagai Dana Solidaritas (Keuskupan)
+// 50% menjadi Dana Operasional Paroki & Pembiayaan Program Seksi
+export function calculateKolekte1Split(nominal: number): {
+  danaSolidaritas: number;
+  danaOperasionalDanProker: number;
+} {
+  const val = Math.max(0, nominal || 0);
+  const danaSolidaritas = Math.round(val * 0.5);
+  const danaOperasionalDanProker = val - danaSolidaritas;
+  return {
+    danaSolidaritas,
+    danaOperasionalDanProker,
+  };
+}
+
+export interface KategoriPenerimaanMeta {
+  id: KategoriPenerimaan;
+  label: string;
+  deskripsi: string;
+  badgeColor: string; // Tailwind class
+  accentColor: string;
+}
+
+export const KATEGORI_PENERIMAAN_LIST: KategoriPenerimaanMeta[] = [
+  {
+    id: 'kolekte_2',
+    label: 'Kolekte II (Dana Pembangunan)',
+    deskripsi: 'Dicatatkan khusus sebagai Dana Pembangunan, tersimpan di kas pembangunan dan hanya dipakai untuk pembiayaan pembangunan/renovasi fisik paroki.',
+    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+    accentColor: 'text-emerald-600',
+  },
+  {
+    id: 'kolekte_1',
+    label: 'Kolekte I (50% Solidaritas : 50% Operasional & Proker)',
+    deskripsi: 'Kolekte misa mingguan yang dibagi otomatis: 50% disetor sebagai Dana Solidaritas Keuskupan, 50% untuk operasional paroki & pembiayaan program kerja seksi.',
+    badgeColor: 'bg-blue-100 text-blue-800 border-blue-300',
+    accentColor: 'text-blue-600',
+  },
+  {
+    id: 'kolekte_khusus',
+    label: 'Kolekte Khusus / Liturgi',
+    deskripsi: 'Kolekte Hari Raya, APP (Aksi Puasa Pembangunan), Aksi Natal, HPS, Minggu Misi',
+    badgeColor: 'bg-purple-100 text-purple-800 border-purple-300',
+    accentColor: 'text-purple-600',
+  },
+  {
+    id: 'persembahan_umat',
+    label: 'Persembahan Syukur & Derma',
+    deskripsi: 'Persembahan intensi khusus umat, ucapan syukur baptis, pernikahan, dan derma kasih',
+    badgeColor: 'bg-amber-100 text-amber-800 border-amber-300',
+    accentColor: 'text-amber-600',
+  },
+  {
+    id: 'iuran_lingkungan',
+    label: 'Iuran Lingkungan & Wilayah',
+    deskripsi: 'Kontribusi iuran gotong royong umat dari lingkungan-lingkungan dan wilayah pastoral',
+    badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+    accentColor: 'text-indigo-600',
+  },
+  {
+    id: 'donatur_spesifik',
+    label: 'Donatur Khusus Proker',
+    deskripsi: 'Sumbangan dermawan/donatur yang ditujukan spesifik untuk membiayai program kerja tertentu',
+    badgeColor: 'bg-rose-100 text-rose-800 border-rose-300',
+    accentColor: 'text-rose-600',
+  },
+  {
+    id: 'usaha_dana_seksi',
+    label: 'Usaha Dana Seksi / Panitia',
+    deskripsi: 'Penerimaan dari bazar, penjualan cinderamata rohani, tiket konser rohani OMK, dsb',
+    badgeColor: 'bg-teal-100 text-teal-800 border-teal-300',
+    accentColor: 'text-teal-600',
+  },
+  {
+    id: 'dana_kelolaan',
+    label: 'Dana Kelolaan & Kas Paroki',
+    deskripsi: 'Alokasi cadangan kas paroki atau bagi hasil dana kelolaan gereja',
+    badgeColor: 'bg-cyan-100 text-cyan-800 border-cyan-300',
+    accentColor: 'text-cyan-600',
+  },
+  {
+    id: 'lain_lain',
+    label: 'Penerimaan Lain-lain',
+    deskripsi: 'Penerimaan insidental lainnya yang sah untuk kas kegiatan',
+    badgeColor: 'bg-slate-100 text-slate-800 border-slate-300',
+    accentColor: 'text-slate-600',
+  },
+];
+
+export function getKategoriMeta(kategori: KategoriPenerimaan): KategoriPenerimaanMeta {
+  const found = KATEGORI_PENERIMAAN_LIST.find((k) => k.id === kategori);
+  return (
+    found || {
+      id: 'lain_lain',
+      label: 'Lain-lain',
+      deskripsi: 'Penerimaan lainnya',
+      badgeColor: 'bg-slate-100 text-slate-800 border-slate-300',
+      accentColor: 'text-slate-600',
+    }
+  );
+}

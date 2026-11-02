@@ -89,5 +89,16 @@ service cloud.firestore {
         && incoming().nama is string;
       allow delete: if isValidId(jabatanId);
     }
+
+    // 9. Penerimaan Mingguan Paroki (Kolekte, Iuran, Donatur untuk Program Kerja)
+    match /penerimaan_mingguan/{penerimaanId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(penerimaanId)
+        && incoming().id == penerimaanId
+        && incoming().rancangan is number
+        && incoming().realisasi is number;
+      allow delete: if isValidId(penerimaanId);
+    }
   }
 }
+

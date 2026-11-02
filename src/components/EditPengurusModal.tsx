@@ -74,6 +74,61 @@ export const EditPengurusModal: React.FC<EditPengurusModalProps> = ({
     if (kat === 'pastor_paroki' || kat === 'vikaris') {
       return masterJabatanList.filter((j) => j.kategori === 'pastor_paroki' || j.kategori === 'vikaris');
     }
+    if (kat === 'dpph') {
+      const result: MasterJabatan[] = [];
+      let hasAnggota = false;
+
+      masterJabatanList
+        .filter((j) => j.kategori === 'dpph')
+        .forEach((j) => {
+          // Setiap jabatan anggota dalam DPPH selalu disatukan menjadi 'Anggota DPPH' tunggal
+          if (j.nama.toLowerCase().includes('anggota') || j.id.startsWith('jab-dpph-anggota')) {
+            if (!hasAnggota) {
+              hasAnggota = true;
+              result.push({
+                id: 'jab-dpph-anggota',
+                nama: 'Anggota DPPH',
+                kategori: 'dpph',
+                keterangan: 'Anggota Dewan Pastoral Paroki Harian (DPPH)',
+                isDefault: true,
+                urutan: 16,
+              });
+            }
+            return;
+          }
+
+          // Singkirkan posisi DPPH usang dengan pembagian sarana, aset, bidang, dsb
+          if (
+            j.nama.includes('Sarana') ||
+            j.nama.includes('Prasarana') ||
+            j.nama.includes('Aset') ||
+            j.nama.includes('Bidang') ||
+            j.nama.includes('Pewartaan') ||
+            j.id.includes('sarana') ||
+            j.id.includes('aset') ||
+            j.id.includes('pewartaan')
+          ) {
+            return;
+          }
+
+          result.push(j);
+        });
+
+      if (!hasAnggota) {
+        result.push({
+          id: 'jab-dpph-anggota',
+          nama: 'Anggota DPPH',
+          kategori: 'dpph',
+          keterangan: 'Anggota Dewan Pastoral Paroki Harian (DPPH)',
+          isDefault: true,
+          urutan: 16,
+        });
+      }
+
+      return result
+        .filter((j, idx, arr) => arr.findIndex((t) => t.nama === j.nama) === idx)
+        .sort((a, b) => (a.urutan || 99) - (b.urutan || 99));
+    }
     return masterJabatanList.filter((j) => j.kategori === kat);
   }, [masterJabatanList, formData.kategori]);
 
@@ -242,7 +297,7 @@ export const EditPengurusModal: React.FC<EditPengurusModalProps> = ({
                     jabatan:
                       prev.kategori === 'seksi'
                         ? `Koordinator ${e.target.value}`
-                        : prev.jabatan || 'Pengurus DPPH',
+                        : prev.jabatan || 'Anggota DPPH',
                   }));
                 }}
                 className="w-full h-8.5 bg-slate-50 border border-slate-300 rounded-xl px-2.5 font-bold text-slate-900 focus:outline-none focus:border-slate-500 focus:bg-white text-xs cursor-pointer"

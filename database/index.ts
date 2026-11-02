@@ -6,8 +6,10 @@ import { SYSTEM_CONFIG, SystemConfig } from './master-data/systemConfig';
 import { SEED_PROGRAMS } from './seed/seedData';
 import { ProgramKerja } from '../src/types/proker';
 import { PengurusItem, MasterJabatan } from '../src/types/pengurus';
+import { PenerimaanMingguan } from '../src/types/penerimaan';
 import { INITIAL_PENGURUS_PAROKI } from '../src/data/initialPengurus';
 import { INITIAL_MASTER_JABATAN } from '../src/data/initialJabatan';
+import { INITIAL_PENERIMAAN_MINGGUAN } from '../src/data/initialPenerimaan';
 import { normalizeDivisionName } from '../src/utils/formatters';
 import {
   collection,
@@ -16,6 +18,7 @@ import {
   setDoc,
   deleteDoc,
   writeBatch,
+  getDocs,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, testConnection } from '../src/firebase';
 
@@ -23,6 +26,7 @@ export const TRANSACTION_PROGRAMS_KEY = SYSTEM_CONFIG.storageKey;
 export const META_STORAGE_KEY = 'proker_db_metadata';
 export const PENGURUS_STORAGE_KEY = 'proker_db_pengurus';
 export const JABATAN_STORAGE_KEY = 'proker_db_master_jabatan';
+export const PENERIMAAN_STORAGE_KEY = 'proker_db_penerimaan_mingguan';
 
 export interface DatabaseMetadata {
   masterDivisions: MasterDivision[];
@@ -53,9 +57,11 @@ class DatabaseService {
   private listeners: Set<(programs: ProgramKerja[]) => void> = new Set();
   private pengurusListeners: Set<(pengurus: PengurusItem[]) => void> = new Set();
   private jabatanListeners: Set<(jabatanList: MasterJabatan[]) => void> = new Set();
+  private penerimaanListeners: Set<(penerimaan: PenerimaanMingguan[]) => void> = new Set();
   private unsubscribeFirestore: (() => void) | null = null;
   private unsubscribeFirestorePengurus: (() => void) | null = null;
   private unsubscribeFirestoreJabatan: (() => void) | null = null;
+  private unsubscribeFirestorePenerimaan: (() => void) | null = null;
   private isConnectedToCloud = false;
 
   constructor() {
@@ -145,6 +151,7 @@ class DatabaseService {
         this.setupFirestoreSync();
         this.setupFirestorePengurusSync();
         this.setupFirestoreJabatanSync();
+        this.setupFirestorePenerimaanSync();
       }
     }
 
@@ -336,10 +343,17 @@ class DatabaseService {
 
   public getPengurus(): PengurusItem[] {
     const list = this.readStorage<PengurusItem[]>(PENGURUS_STORAGE_KEY, []);
-    if (!list || list.length === 0) {
-      return INITIAL_PENGURUS_PAROKI;
-    }
-    return list;
+    const sourceList = !list || list.length === 0 ? INITIAL_PENGURUS_PAROKI : list;
+    return sourceList.map((p) => {
+      if (p.kategori === 'dpph' && (p.jabatan.toLowerCase().includes('anggota') || p.id === 'pengurus-dpph-anggota-1')) {
+        return {
+          ...p,
+          jabatan: 'Anggota DPPH',
+          catatan: 'Anggota DPPH (Dewan Pastoral Paroki Harian)',
+        };
+      }
+      return p;
+    });
   }
 
   public getPengurusById(id: string): PengurusItem | undefined {
@@ -421,7 +435,12 @@ class DatabaseService {
           } else {
             const cloudPengurus: PengurusItem[] = [];
             snapshot.forEach((docSnap) => {
-              cloudPengurus.push(docSnap.data() as PengurusItem);
+              const data = docSnap.data() as PengurusItem;
+              if (data.kategori === 'dpph' && (data.jabatan.toLowerCase().includes('anggota') || data.id === 'pengurus-dpph-anggota-1')) {
+                data.jabatan = 'Anggota DPPH';
+                data.catatan = 'Anggota DPPH (Dewan Pastoral Paroki Harian)';
+              }
+              cloudPengurus.push(data);
             });
             cloudPengurus.sort((a, b) => (a.urutan || 99) - (b.urutan || 99));
             this.writeStorage(PENGURUS_STORAGE_KEY, cloudPengurus);
@@ -452,14 +471,72 @@ class DatabaseService {
     }
   }
 
-  // 4B. Master Jabatan Pengurus Methods
   public getMasterJabatan(): MasterJabatan[] {
     const cached = this.readStorage<MasterJabatan[]>(JABATAN_STORAGE_KEY, []);
-    if (!cached || cached.length === 0) {
-      this.writeStorage(JABATAN_STORAGE_KEY, INITIAL_MASTER_JABATAN);
-      return INITIAL_MASTER_JABATAN;
+    const source = !cached || cached.length === 0 ? INITIAL_MASTER_JABATAN : cached;
+
+    const cleaned: MasterJabatan[] = [];
+    let hasAnggotaDpph = false;
+
+    source.forEach((j) => {
+      if (j.kategori === 'dpph') {
+        // Standarisasi SETIAP bentuk anggota DPPH menjadi hanya satu "Anggota DPPH"
+        if (j.nama.toLowerCase().includes('anggota') || j.id.startsWith('jab-dpph-anggota')) {
+          if (!hasAnggotaDpph) {
+            hasAnggotaDpph = true;
+            cleaned.push({
+              id: 'jab-dpph-anggota',
+              nama: 'Anggota DPPH',
+              kategori: 'dpph',
+              keterangan: 'Anggota Dewan Pastoral Paroki Harian (DPPH)',
+              isDefault: true,
+              urutan: 16,
+            });
+          }
+          return;
+        }
+
+        // Hapus/abaikan jabatan DPPH lama yang memiliki pembagian bidang, sarana, aset, dsb
+        if (
+          j.nama.includes('Sarana') ||
+          j.nama.includes('Prasarana') ||
+          j.nama.includes('Aset') ||
+          j.nama.includes('Bidang') ||
+          j.nama.includes('Pewartaan') ||
+          j.id.includes('sarana') ||
+          j.id.includes('aset') ||
+          j.id.includes('pewartaan') ||
+          j.id.includes('liturgi') ||
+          j.id.includes('paguyuban') ||
+          j.id.includes('pelayanan') ||
+          j.id.includes('tata-kelola')
+        ) {
+          return;
+        }
+      }
+      cleaned.push(j);
+    });
+
+    if (!hasAnggotaDpph) {
+      cleaned.push({
+        id: 'jab-dpph-anggota',
+        nama: 'Anggota DPPH',
+        kategori: 'dpph',
+        keterangan: 'Anggota Dewan Pastoral Paroki Harian (DPPH)',
+        isDefault: true,
+        urutan: 16,
+      });
     }
-    return cached;
+
+    const seen = new Set<string>();
+    return cleaned
+      .filter((j) => {
+        const key = `${j.kategori}::${j.nama}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => (a.urutan || 99) - (b.urutan || 99));
   }
 
   public subscribeMasterJabatan(listener: (jabatanList: MasterJabatan[]) => void): () => void {
@@ -525,7 +602,17 @@ class DatabaseService {
     this.writeStorage(JABATAN_STORAGE_KEY, INITIAL_MASTER_JABATAN);
     this.notifyJabatanSubscribers(INITIAL_MASTER_JABATAN);
     try {
+      const jabatanCol = collection(db, 'master_jabatan');
+      const snapshot = await getDocs(jabatanCol);
       const batch = writeBatch(db);
+
+      const validIds = new Set(INITIAL_MASTER_JABATAN.map((i) => i.id));
+      snapshot.forEach((d) => {
+        if (!validIds.has(d.id)) {
+          batch.delete(d.ref);
+        }
+      });
+
       INITIAL_MASTER_JABATAN.forEach((item) => {
         const docRef = doc(db, 'master_jabatan', item.id);
         batch.set(docRef, sanitizeForFirestore(item));
@@ -554,13 +641,94 @@ class DatabaseService {
             batch.commit().catch(console.error);
           } else {
             const cloudList: MasterJabatan[] = [];
+            const seen = new Set<string>();
+            const docsToDelete: string[] = [];
+            let hasAnggotaDpph = false;
+
             snapshot.forEach((docSnap) => {
-              cloudList.push(docSnap.data() as MasterJabatan);
+              const data = docSnap.data() as MasterJabatan;
+              const docId = docSnap.id;
+
+              // Standarisasi anggota DPPH: HANYA ada satu 'Anggota DPPH' yang sah
+              if (
+                data.kategori === 'dpph' &&
+                (data.nama.toLowerCase().includes('anggota') || data.id.startsWith('jab-dpph-anggota'))
+              ) {
+                if (!hasAnggotaDpph) {
+                  hasAnggotaDpph = true;
+                  cloudList.push({
+                    id: 'jab-dpph-anggota',
+                    nama: 'Anggota DPPH',
+                    kategori: 'dpph',
+                    keterangan: 'Anggota Dewan Pastoral Paroki Harian (DPPH)',
+                    isDefault: true,
+                    urutan: 16,
+                  });
+                }
+                // Jika docId bukan id baku 'jab-dpph-anggota' atau namanya memiliki embel-embel (misal Sarana Prasarana & Aset), hapus dari Firestore!
+                if (docId !== 'jab-dpph-anggota' || data.nama !== 'Anggota DPPH') {
+                  docsToDelete.push(docId);
+                }
+                return;
+              }
+
+              // Identifikasi item DPPH lama yang memiliki pembagian bidang, sarana, aset, atau id usang
+              if (
+                data.kategori === 'dpph' &&
+                (data.nama.includes('Sarana') ||
+                  data.nama.includes('Prasarana') ||
+                  data.nama.includes('Aset') ||
+                  data.nama.includes('Bidang') ||
+                  data.nama.includes('Pewartaan') ||
+                  data.nama.includes('Liturgi') ||
+                  data.nama.includes('Paguyuban') ||
+                  data.nama.includes('Pelayanan') ||
+                  data.nama.includes('Tata Kelola') ||
+                  docId.includes('sarana') ||
+                  docId.includes('aset') ||
+                  docId.includes('pewartaan') ||
+                  docId.includes('liturgi') ||
+                  docId.includes('paguyuban') ||
+                  docId.includes('pelayanan') ||
+                  docId.includes('tata-kelola') ||
+                  docId === 'jab-dpph-anggota-polos')
+              ) {
+                docsToDelete.push(docId);
+                return;
+              }
+
+              const key = `${data.kategori}::${data.nama}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                cloudList.push(data);
+              }
             });
+
+            if (!hasAnggotaDpph) {
+              cloudList.push({
+                id: 'jab-dpph-anggota',
+                nama: 'Anggota DPPH',
+                kategori: 'dpph',
+                keterangan: 'Anggota Dewan Pastoral Paroki Harian (DPPH)',
+                isDefault: true,
+                urutan: 16,
+              });
+            }
+
             cloudList.sort((a, b) => (a.urutan || 99) - (b.urutan || 99));
             this.writeStorage(JABATAN_STORAGE_KEY, cloudList);
             this.notifyJabatanSubscribers(cloudList);
             console.info(`[Firebase] Synced ${cloudList.length} master_jabatan from Cloud Firestore.`);
+
+            // Hapus dokumen DPPH usang/duplikat dari Cloud Firestore
+            if (docsToDelete.length > 0) {
+              console.info(`[Firebase] Deleting ${docsToDelete.length} obsolete DPPH position docs from Cloud Firestore:`, docsToDelete);
+              const batch = writeBatch(db);
+              docsToDelete.forEach((id) => {
+                batch.delete(doc(db, 'master_jabatan', id));
+              });
+              batch.commit().catch(console.error);
+            }
           }
         },
         (error) => {
@@ -654,6 +822,151 @@ class DatabaseService {
       };
     } catch (e: any) {
       return { success: false, count: 0, message: `Gagal membaca file JSON: ${e?.message || e}` };
+    }
+  }
+
+  // ==========================================
+  // PENERIMAAN KAS MINGGUAN (PROKER & PASTORAL)
+  // ==========================================
+
+  public getPenerimaan(): PenerimaanMingguan[] {
+    const cached = this.readStorage<PenerimaanMingguan[]>(PENERIMAAN_STORAGE_KEY, []);
+    if (!cached || cached.length === 0) {
+      this.writeStorage(PENERIMAAN_STORAGE_KEY, INITIAL_PENERIMAAN_MINGGUAN);
+      return INITIAL_PENERIMAAN_MINGGUAN;
+    }
+    return cached;
+  }
+
+  public subscribePenerimaan(listener: (penerimaan: PenerimaanMingguan[]) => void): () => void {
+    this.penerimaanListeners.add(listener);
+    listener(this.getPenerimaan());
+    return () => {
+      this.penerimaanListeners.delete(listener);
+    };
+  }
+
+  private notifyPenerimaanSubscribers(penerimaan: PenerimaanMingguan[]): void {
+    this.penerimaanListeners.forEach((listener) => {
+      try {
+        listener(penerimaan);
+      } catch (err) {
+        console.error('Error in penerimaan subscriber callback:', err);
+      }
+    });
+  }
+
+  public async savePenerimaan(item: PenerimaanMingguan): Promise<PenerimaanMingguan> {
+    const list = this.getPenerimaan();
+    const existingIndex = list.findIndex((p) => p.id === item.id);
+    let updated: PenerimaanMingguan[];
+    const itemWithTimestamps: PenerimaanMingguan = {
+      ...item,
+      updatedAt: new Date().toISOString(),
+      createdAt: item.createdAt || new Date().toISOString(),
+    };
+
+    if (existingIndex >= 0) {
+      updated = [...list];
+      updated[existingIndex] = itemWithTimestamps;
+    } else {
+      updated = [itemWithTimestamps, ...list];
+    }
+
+    this.writeStorage(PENERIMAAN_STORAGE_KEY, updated);
+    this.notifyPenerimaanSubscribers(updated);
+
+    try {
+      const docRef = doc(db, 'penerimaan_mingguan', itemWithTimestamps.id);
+      await setDoc(docRef, sanitizeForFirestore(itemWithTimestamps));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `penerimaan_mingguan/${itemWithTimestamps.id}`);
+    }
+    return itemWithTimestamps;
+  }
+
+  public async deletePenerimaan(id: string): Promise<boolean> {
+    const list = this.getPenerimaan();
+    const filtered = list.filter((p) => p.id !== id);
+    if (filtered.length !== list.length) {
+      this.writeStorage(PENERIMAAN_STORAGE_KEY, filtered);
+      this.notifyPenerimaanSubscribers(filtered);
+
+      try {
+        const docRef = doc(db, 'penerimaan_mingguan', id);
+        await deleteDoc(docRef);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, `penerimaan_mingguan/${id}`);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  public async resetPenerimaan(): Promise<void> {
+    this.writeStorage(PENERIMAAN_STORAGE_KEY, INITIAL_PENERIMAAN_MINGGUAN);
+    this.notifyPenerimaanSubscribers(INITIAL_PENERIMAAN_MINGGUAN);
+    try {
+      const col = collection(db, 'penerimaan_mingguan');
+      const snapshot = await getDocs(col);
+      const batch = writeBatch(db);
+      snapshot.forEach((d) => batch.delete(d.ref));
+      INITIAL_PENERIMAAN_MINGGUAN.forEach((item) => {
+        const ref = doc(db, 'penerimaan_mingguan', item.id);
+        batch.set(ref, sanitizeForFirestore(item));
+      });
+      await batch.commit();
+    } catch (err) {
+      console.warn('Failed resetting penerimaan in Firestore:', err);
+    }
+  }
+
+  private setupFirestorePenerimaanSync(): void {
+    if (this.unsubscribeFirestorePenerimaan) return;
+    try {
+      const col = collection(db, 'penerimaan_mingguan');
+      this.unsubscribeFirestorePenerimaan = onSnapshot(
+        col,
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const cloudItems: PenerimaanMingguan[] = [];
+            snapshot.forEach((d) => {
+              cloudItems.push(d.data() as PenerimaanMingguan);
+            });
+            cloudItems.sort((a, b) => {
+              if (a.tahun !== b.tahun) return a.tahun - b.tahun;
+              if (a.bulan !== b.bulan) return a.bulan - b.bulan;
+              return a.mingguKe - b.mingguKe;
+            });
+            this.writeStorage(PENERIMAAN_STORAGE_KEY, cloudItems);
+            this.notifyPenerimaanSubscribers(cloudItems);
+          } else {
+            // First time seeding to Cloud
+            this.seedInitialPenerimaanToFirestore();
+          }
+        },
+        (error) => {
+          console.warn('[Firebase] Firestore penerimaan snapshot warning:', error.message);
+        }
+      );
+    } catch (e) {
+      console.warn('[Firebase] Exception setting up penerimaan sync:', e);
+    }
+  }
+
+  private async seedInitialPenerimaanToFirestore(): Promise<void> {
+    try {
+      const localData = this.getPenerimaan();
+      const itemsToSeed = localData.length > 0 ? localData : INITIAL_PENERIMAAN_MINGGUAN;
+      const batch = writeBatch(db);
+      itemsToSeed.forEach((item) => {
+        const ref = doc(db, 'penerimaan_mingguan', item.id);
+        batch.set(ref, sanitizeForFirestore(item));
+      });
+      await batch.commit();
+      console.info(`[Firebase] Initialized ${itemsToSeed.length} penerimaan items in Cloud Firestore`);
+    } catch (err) {
+      console.warn('[Firebase] Failed to seed initial penerimaan:', err);
     }
   }
 }

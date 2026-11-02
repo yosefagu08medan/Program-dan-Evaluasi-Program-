@@ -93,6 +93,7 @@ export const UnlockUnitModal: React.FC<UnlockUnitModalProps> = ({
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white cursor-pointer appearance-none pr-7"
               >
                 <option value="admin">👑 Pastor Paroki / Admin</option>
+                <option value="bendahara">💰 Bendahara Paroki (Kolekte I & II)</option>
                 <option value="all">🌐 Buka Semua Unit (Universal)</option>
                 <optgroup label="─── Unit Seksi & DPPH ───">
                   {MASTER_DIVISIONS.map((div) => (

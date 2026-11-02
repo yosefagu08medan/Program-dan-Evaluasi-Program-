@@ -1,4 +1,4 @@
-import { ProgramKerja, ScheduleType, ProgramStatus, EvaluasiProgram } from '../types/proker';
+import { ProgramKerja, ScheduleType, ProgramStatus, EvaluasiProgram, KategoriProgram } from '../types/proker';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
 
 export const BULAN_LIST = [
@@ -54,7 +54,7 @@ export function normalizeDivisionName(divisi: string | undefined): string {
   if (dLower.includes('kki') || dLower.includes('karya kepausan')) return 'Seksi KKI';
   if (dLower.includes('evangelisasi')) return 'Seksi Evangelisasi';
   if (dLower.includes('kks') || dLower.includes('kitab suci')) return 'Seksi KKS';
-  if (dLower.includes('plbks') || dLower.includes('lingkungan')) return 'Seksi PLBKS';
+  if (dLower.includes('plbks') || dLower.includes('komuni suci') || dLower.includes('pelayan luar biasa')) return 'PLBKS (Pelayan Luar Biasa Komuni Suci)';
   if (dLower.includes('kerawam') || dLower.includes('awam')) return 'Seksi Kerasulan Awam';
   if (dLower.includes('hak') || dLower.includes('kepercayaan')) return 'Seksi HAK';
   if (dLower.includes('umum') || dLower.includes('sarana') || dLower.includes('rumah tangga')) return 'Seksi Umum';
@@ -314,6 +314,99 @@ export function getSisaBudgetUntukBulan(p: ProgramKerja, bulanTarget: number): n
   const terpakaiSebelumnya = getAnggaranTerpakaiSebelumBulan(p, bulanTarget);
   const totalBudget = p.estimasiAnggaran || 0;
   return Math.max(0, totalBudget - terpakaiSebelumnya);
+}
+
+/**
+ * Alokasi kebutuhan biaya program untuk bulan tertentu:
+ * 1. Jika program memiliki kustom alokasi dana bulanan (isKustomAlokasiDana && alokasiDanaBulanan):
+ *    - Gunakan nominal yang ditentukan spesifik untuk bulan tersebut (misal Panitia Paskah Feb: 0, Mar: 15jt, Apr: 5jt).
+ * 2. Untuk program yang dilaksanakan 'sepanjang_tahun' atau pelayanan rutin yang berlangsung 12 bulan:
+ *    - Biaya yang dibudgetkan (estimasiAnggaran) dibagi secara rata tiap bulannya (dibagi 12).
+ * 3. Untuk 'multi_bulan':
+ *    - Dibagi rata ke bulan-bulan pelaksanaannya jika tidak dikustomisasi.
+ * 4. Untuk 'satu_kali':
+ *    - Dialokasikan penuh ke bulan pelaksanaannya.
+ */
+export function getAlokasiBudgetBulanan(p: ProgramKerja, bulan: number): number {
+  if (!p.estimasiAnggaran || p.estimasiAnggaran <= 0) return 0;
+
+  // 1. Kustomisasi alokasi dana per bulan jika diaktifkan (misal Feb: 0, Mar: 15.000.000, Apr: 5.000.000)
+  if (p.isKustomAlokasiDana && p.alokasiDanaBulanan) {
+    if (typeof p.alokasiDanaBulanan[bulan] === 'number') {
+      return p.alokasiDanaBulanan[bulan];
+    }
+    return 0;
+  }
+
+  // 2. Program sepanjang tahun: dibagi secara rata 12 bulan
+  if (p.tipeJadwal === 'sepanjang_tahun') {
+    return Math.round(p.estimasiAnggaran / 12);
+  }
+
+  // 3. Daftar bulan pelaksanaan
+  const blnList = Array.isArray(p.bulanPelaksanaan) && p.bulanPelaksanaan.length > 0
+    ? p.bulanPelaksanaan
+    : [1];
+
+  // Jika bulan target termasuk dalam jadwal pelaksanaan
+  if (blnList.includes(bulan)) {
+    return Math.round(p.estimasiAnggaran / blnList.length);
+  }
+
+  // Jika pelayanan rutin/berulang tanpa bulan spesifik
+  if (isPelayananRutin(p) || isRapatDPPH(p)) {
+    return Math.round(p.estimasiAnggaran / 12);
+  }
+
+  return 0;
+}
+
+export function getKategoriProgramInfo(kategori?: KategoriProgram) {
+  switch (kategori) {
+    case 'program_rutin':
+      return {
+        key: 'program_rutin',
+        label: 'Program Rutin',
+        deskripsi: 'Rutin bulanan / multi-bulan dengan alokasi pencairan dana & catatan terencana',
+        badge: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+        badgeDark: 'bg-emerald-600 text-white',
+        dot: 'bg-emerald-500',
+        iconEmoji: '🔄',
+      };
+    case 'program_tentatif':
+      return {
+        key: 'program_tentatif',
+        label: 'Opsional / Tentatif',
+        deskripsi: 'Program cadangan/situasional, akan digunakan hanya jika diperlukan',
+        badge: 'bg-purple-50 text-purple-800 border-purple-300',
+        badgeDark: 'bg-purple-600 text-white',
+        dot: 'bg-purple-500',
+        iconEmoji: '⚡',
+      };
+    case 'program_biasa':
+    default:
+      return {
+        key: 'program_biasa',
+        label: 'Program Biasa',
+        deskripsi: 'Program kerja standar paroki terjadwal',
+        badge: 'bg-slate-100 text-slate-800 border-slate-300',
+        badgeDark: 'bg-slate-700 text-white',
+        dot: 'bg-slate-400',
+        iconEmoji: '📋',
+      };
+  }
+}
+
+/**
+ * Cek apakah suatu program aktif pada bulan tertentu
+ */
+export function isProgramAktifDiBulan(p: ProgramKerja, bulan: number): boolean {
+  if (p.tipeJadwal === 'sepanjang_tahun') return true;
+  if (isPelayananRutin(p) || isRapatDPPH(p)) return true;
+  const blnList = Array.isArray(p.bulanPelaksanaan) && p.bulanPelaksanaan.length > 0
+    ? p.bulanPelaksanaan
+    : [1];
+  return blnList.includes(bulan);
 }
 
 /**

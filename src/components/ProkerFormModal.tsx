@@ -25,6 +25,7 @@ interface ProkerFormModalProps {
   onSave: (program: Omit<ProgramKerja, 'id' | 'createdAt' | 'updatedAt'>, editId?: string) => void;
   editingProgram: ProgramKerja | null;
   defaultYear?: 2026 | 2027;
+  initialIsLuarRancangan?: boolean;
 }
 
 export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
@@ -33,6 +34,7 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
   onSave,
   editingProgram,
   defaultYear = 2026,
+  initialIsLuarRancangan = false,
 }) => {
   // Form State
   const [tahun, setTahun] = useState<2026 | 2027>(defaultYear);
@@ -49,6 +51,8 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
   const [pjKontak, setPjKontak] = useState('');
   const [status, setStatus] = useState<ProgramStatus>('direncanakan');
   const [catatan, setCatatan] = useState('');
+  const [isLuarRancangan, setIsLuarRancangan] = useState<boolean>(initialIsLuarRancangan);
+  const [alasanLuarRancangan, setAlasanLuarRancangan] = useState<string>('');
 
   // Error validations
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -69,6 +73,8 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
       setPjKontak(editingProgram.penanggungjawab?.kontak || '');
       setStatus(editingProgram.status);
       setCatatan(editingProgram.catatan || '');
+      setIsLuarRancangan(!!editingProgram.isLuarRancangan);
+      setAlasanLuarRancangan(editingProgram.alasanLuarRancangan || '');
     } else {
       // Reset form
       setTahun(defaultYear);
@@ -83,11 +89,13 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
       setPjNama('');
       setPjDivisi(DAFTAR_DIVISI[0]);
       setPjKontak('');
-      setStatus('direncanakan');
+      setStatus(initialIsLuarRancangan ? 'selesai' : 'direncanakan');
       setCatatan('');
+      setIsLuarRancangan(initialIsLuarRancangan);
+      setAlasanLuarRancangan('');
     }
     setErrors({});
-  }, [editingProgram, defaultYear, isOpen]);
+  }, [editingProgram, defaultYear, initialIsLuarRancangan, isOpen]);
 
   if (!isOpen) return null;
 
@@ -170,6 +178,8 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
           kontak: pjKontak.trim(),
         },
         status,
+        isLuarRancangan: isLuarRancangan || undefined,
+        alasanLuarRancangan: isLuarRancangan ? (alasanLuarRancangan.trim() || undefined) : undefined,
         catatan: catatan.trim() || undefined,
       },
       editingProgram?.id
@@ -244,6 +254,83 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
                 {tahun === 2027 && <Check className="w-3.5 h-3.5" />}
               </button>
             </div>
+          </div>
+
+          {/* 1B. KATEGORI RANCANGAN: PROGRAM RANCANGAN vs PROGRAM DI LUAR RANCANGAN (TERLAKSANA) */}
+          <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/90 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Kategori Rancangan Program</span>
+              </label>
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                isLuarRancangan ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {isLuarRancangan ? '⚡ Di Luar Rancangan' : 'Rancangan Awal'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setIsLuarRancangan(false)}
+                className={`py-2 px-3 rounded-xl border text-left text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
+                  !isLuarRancangan
+                    ? 'bg-white border-slate-800 text-slate-900 shadow-xs ring-1 ring-slate-800'
+                    : 'bg-white/60 border-slate-200 text-slate-600 hover:bg-white'
+                }`}
+              >
+                <div>
+                  <div className="text-xs font-bold text-slate-900">Rancangan Awal</div>
+                  <div className="text-[10px] text-slate-500 font-normal">Program kerja terjadwal resmi</div>
+                </div>
+                {!isLuarRancangan && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsLuarRancangan(true);
+                  if (status === 'direncanakan') {
+                    setStatus('selesai');
+                  }
+                }}
+                className={`py-2 px-3 rounded-xl border text-left text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
+                  isLuarRancangan
+                    ? 'bg-amber-50 border-amber-500 text-amber-950 shadow-xs ring-1 ring-amber-500'
+                    : 'bg-white/60 border-slate-200 text-slate-600 hover:bg-white'
+                }`}
+              >
+                <div>
+                  <div className="text-xs font-bold text-amber-950 flex items-center gap-1">
+                    <span>Di Luar Rancangan</span>
+                    <span className="text-[9px] px-1 bg-amber-200 text-amber-900 rounded font-black">Insidental</span>
+                  </div>
+                  <div className="text-[10px] text-amber-800/80 font-normal">Terlaksana tanpa masuk rancangan</div>
+                </div>
+                {isLuarRancangan && <Check className="w-4 h-4 text-amber-700 shrink-0" />}
+              </button>
+            </div>
+
+            {isLuarRancangan && (
+              <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 space-y-2 animate-in fade-in duration-150">
+                <p className="text-[11px] text-amber-900 leading-relaxed font-medium">
+                  💡 <strong>Program di Luar Rancangan:</strong> Kegiatan ini terlaksana untuk merespon kebutuhan pastoral paroki, meski sebelumnya belum masuk dalam buku/rancangan program kerja tahunan.
+                </p>
+                <div>
+                  <label className="block text-[10.5px] font-bold text-amber-950 mb-1">
+                    Alasan / Latar Belakang Pelaksanaan di Luar Rancangan (Opsional):
+                  </label>
+                  <input
+                    type="text"
+                    value={alasanLuarRancangan}
+                    onChange={(e) => setAlasanLuarRancangan(e.target.value)}
+                    placeholder="Contoh: Kebutuhan pastoral darurat / Instruksi keuskupan / Respon kedukaan umat..."
+                    className="w-full bg-white border border-amber-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-amber-600"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 2. NAMA PROGRAM */}
@@ -413,16 +500,47 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
 
             {/* Sub-UI depending on tipeJadwal */}
             {tipeJadwal === 'sepanjang_tahun' && (
-              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>
-                  Program ini akan ditandai aktif di setiap bulan dari Januari hingga Desember (12 Bulan Penuh).
-                </span>
+              <div className="space-y-2.5">
+                <div className="p-3 bg-emerald-50/80 border border-emerald-300 rounded-xl text-xs text-emerald-950 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black flex items-center gap-1.5 text-emerald-900">
+                      <Calendar className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <span>Pelaksanaan Sepanjang Tahun: Dibagi Rata Tiap Bulan</span>
+                    </span>
+                    <span className="text-[10px] font-black bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded-full">
+                      12 Bulan Penuh
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-emerald-800 leading-relaxed font-medium">
+                    Total anggaran <strong>{formatRupiah(estimasiAnggaran)}</strong> secara otomatis dibagi rata sebesar{' '}
+                    <strong className="text-emerald-950 font-black">
+                      {formatRupiah(Math.round(estimasiAnggaran / 12))}
+                    </strong>{' '}
+                    setiap bulannya (Januari s/d Desember).
+                  </p>
+                </div>
+
+                {/* 12 Months Breakdown Position Grid */}
+                <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-1.5">
+                  <span className="text-[10.5px] font-black uppercase tracking-wider text-slate-500 block">
+                    Posisi Alokasi Anggaran Bulanan (Bagi Rata 12 Bulan):
+                  </span>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 text-center">
+                    {BULAN_LIST.map((m) => (
+                      <div key={m.no} className="bg-white p-1.5 rounded-lg border border-slate-200 shadow-2xs">
+                        <span className="text-[10px] font-bold text-slate-500 block">{m.singkatan}</span>
+                        <strong className="text-[10.5px] font-black text-emerald-800 block mt-0.5">
+                          {formatRupiah(Math.round(estimasiAnggaran / 12))}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
             {tipeJadwal === 'multi_bulan' && (
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-800">
                     Pilih Bulan Pelaksanaan ({bulanPelaksanaan.length} bulan terpilih)
@@ -454,7 +572,7 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
                   </div>
                 </div>
 
-                {/* 12 Months Grid */}
+                {/* 12 Months Grid Toggle */}
                 <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5">
                   {BULAN_LIST.map((m) => {
                     const isSelected = bulanPelaksanaan.includes(m.no);
@@ -477,6 +595,42 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
                 {errors.bulanPelaksanaan && (
                   <p className="text-[11px] font-medium text-rose-500">{errors.bulanPelaksanaan}</p>
                 )}
+
+                {/* Posisi Penggunaan Anggaran Multi Bulan */}
+                <div className="p-2.5 bg-white rounded-xl border border-emerald-300 shadow-2xs space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-black text-emerald-950">
+                      Posisi Penggunaan Anggaran ({bulanPelaksanaan.length} Bulan Aktif):
+                    </span>
+                    <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      {bulanPelaksanaan.length > 0
+                        ? `${formatRupiah(Math.round(estimasiAnggaran / bulanPelaksanaan.length))} / bulan aktif`
+                        : 'Rp 0'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1 text-center pt-1">
+                    {BULAN_LIST.map((m) => {
+                      const isActive = bulanPelaksanaan.includes(m.no);
+                      return (
+                        <div
+                          key={m.no}
+                          className={`p-1.5 rounded-lg border text-[10px] ${
+                            isActive
+                              ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-black'
+                              : 'bg-slate-50 border-slate-200 text-slate-400 font-medium'
+                          }`}
+                        >
+                          <span className="block font-bold">{m.singkatan}</span>
+                          <span className="block mt-0.5 truncate">
+                            {isActive
+                              ? formatRupiah(Math.round(estimasiAnggaran / (bulanPelaksanaan.length || 1)))
+                              : '-'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
 

@@ -615,7 +615,19 @@ export const DownloadPdfModal: React.FC<DownloadPdfModalProps> = ({
                           </span>
                         </td>
                         <td className="py-1.5 px-2 font-bold text-slate-900 leading-tight">
-                          {p.namaProgram}
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {p.isLuarRancangan && (
+                              <span className="text-[7.5px] font-black px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                ⚡ Luar Rancangan
+                              </span>
+                            )}
+                            <span>{p.namaProgram}</span>
+                          </div>
+                          {p.alasanLuarRancangan && (
+                            <p className="text-[8px] font-medium text-amber-800 italic mt-0.5">
+                              Catatan: {p.alasanLuarRancangan}
+                            </p>
+                          )}
                           {p.targetSasaran && (
                             <p className="text-[8.5px] font-normal text-slate-500 mt-0.5 line-clamp-1">
                               Sasaran: {p.targetSasaran}
@@ -642,9 +654,9 @@ export const DownloadPdfModal: React.FC<DownloadPdfModalProps> = ({
                           {formatRupiah(sisa)}
                         </td>
                         <td className="py-1.5 px-1.5 text-center">
-                          {isEvaluated ? (
+                          {isEvaluated || (p.isLuarRancangan && p.status === 'selesai') ? (
                             <span className="inline-block px-1.5 py-0.5 rounded font-black text-[8px] bg-emerald-100 text-emerald-900 border border-emerald-300">
-                              ✓ Terlaksana
+                              {p.isLuarRancangan ? '✓ Terlaksana (Insidental)' : '✓ Terlaksana'}
                             </span>
                           ) : p.evaluasi?.statusKeterlaksanaan === 'perubahan_waktu' ? (
                             <span className="inline-block px-1.5 py-0.5 rounded font-bold text-[8px] bg-amber-100 text-amber-900 border border-amber-300">

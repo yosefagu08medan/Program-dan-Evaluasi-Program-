@@ -8,6 +8,7 @@ const SESSION_STORAGE_KEY = 'proker_auth_session_v2';
 
 export const DEFAULT_ADMIN_PIN = '08121879'; // Pastor Paroki / Admin
 export const DEFAULT_UNIVERSAL_PIN = '123456'; // Buka Semua Seksi
+export const DEFAULT_BENDAHARA_PIN = '246810'; // Bendahara Paroki (Kolekte I & Kolekte II)
 export const LEGACY_UNIVERSAL_PIN = '121314Katedral'; // Legacy alias support
 
 export function createInitialPinConfig(): PinConfig {
@@ -19,6 +20,7 @@ export function createInitialPinConfig(): PinConfig {
   return {
     adminPin: DEFAULT_ADMIN_PIN,
     universalPin: DEFAULT_UNIVERSAL_PIN,
+    bendaharaPin: DEFAULT_BENDAHARA_PIN,
     unitPins,
   };
 }
@@ -45,6 +47,7 @@ class AuthPinService {
         return {
           adminPin: parsed.adminPin || DEFAULT_ADMIN_PIN,
           universalPin: parsed.universalPin || DEFAULT_UNIVERSAL_PIN,
+          bendaharaPin: parsed.bendaharaPin || DEFAULT_BENDAHARA_PIN,
           unitPins: mergedUnitPins,
           lastResetAt: parsed.lastResetAt,
         };
@@ -84,10 +87,11 @@ class AuthPinService {
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         const cloudData = snap.data() as Partial<PinConfig>;
-        if (cloudData.adminPin || cloudData.unitPins) {
+        if (cloudData.adminPin || cloudData.unitPins || cloudData.bendaharaPin) {
           const merged: PinConfig = {
             adminPin: cloudData.adminPin || this.config.adminPin,
             universalPin: cloudData.universalPin || this.config.universalPin,
+            bendaharaPin: cloudData.bendaharaPin || this.config.bendaharaPin || DEFAULT_BENDAHARA_PIN,
             unitPins: { ...this.config.unitPins, ...(cloudData.unitPins || {}) },
             lastResetAt: cloudData.lastResetAt || this.config.lastResetAt,
           };
@@ -112,6 +116,10 @@ class AuthPinService {
 
   public getUniversalPin(): string {
     return this.config.universalPin;
+  }
+
+  public getBendaharaPin(): string {
+    return this.config.bendaharaPin || DEFAULT_BENDAHARA_PIN;
   }
 
   public getUnitPin(unitId: string): string {
@@ -157,6 +165,18 @@ class AuthPinService {
     return true;
   }
 
+  // Update PIN Khusus Bendahara Paroki (Kolekte I & Kolekte II)
+  public updateBendaharaPin(newPin: string): boolean {
+    if (!newPin || newPin.trim().length === 0) return false;
+    const cleanPin = newPin.trim();
+    const updated: PinConfig = {
+      ...this.config,
+      bendaharaPin: cleanPin,
+    };
+    this.saveConfig(updated);
+    return true;
+  }
+
   // Reset SEMUA PIN Seksi ke default ('123456')
   // Fitur khusus Pastor Paroki / Admin
   public resetAllSeksiPins(defaultPin: string = DEFAULT_UNIVERSAL_PIN): void {
@@ -176,7 +196,7 @@ class AuthPinService {
 
   // Validasi login / PIN untuk unit atau role
   public verifyPin(
-    targetId: string, // 'admin' | 'all' | 'div-xxx' | unit name
+    targetId: string, // 'admin' | 'all' | 'bendahara' | 'div-xxx' | unit name
     enteredPin: string
   ): {
     success: boolean;
@@ -203,7 +223,33 @@ class AuthPinService {
       return { success: false, errorMessage: 'PIN Pastor Paroki / Admin tidak sesuai.' };
     }
 
-    // 2. Target: Semua Seksi / Semua Unit
+    // 2. Target: Bendahara Paroki (Dedicated Login untuk Kolekte I & II)
+    if (
+      targetId === 'bendahara' ||
+      targetId === 'bendahara_paroki' ||
+      targetId.toLowerCase().includes('bendahara')
+    ) {
+      const bPin = this.config.bendaharaPin || DEFAULT_BENDAHARA_PIN;
+      if (
+        pin === bPin ||
+        pin === DEFAULT_BENDAHARA_PIN ||
+        pin === this.config.adminPin ||
+        pin === DEFAULT_ADMIN_PIN
+      ) {
+        return {
+          success: true,
+          role: 'bendahara',
+          unitId: 'bendahara',
+          unitNama: 'Bendahara Paroki',
+        };
+      }
+      return {
+        success: false,
+        errorMessage: 'PIN Bendahara Paroki tidak sesuai. Hubungi Pastor Paroki/Admin jika memerlukan reset.',
+      };
+    }
+
+    // 3. Target: Semua Seksi / Semua Unit
     if (targetId === 'all') {
       if (
         pin === this.config.universalPin ||

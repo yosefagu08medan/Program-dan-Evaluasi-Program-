@@ -74,6 +74,26 @@ export const MasterJabatanModal: React.FC<MasterJabatanModalProps> = ({
   // Filter daftar jabatan
   const filteredList = useMemo(() => {
     return jabatanList.filter((j) => {
+      // Saring posisi DPPH lama yang memiliki pembagian bidang, sarana prasarana, aset, atau sub-divisi
+      if (
+        j.kategori === 'dpph' &&
+        (j.nama.includes('Sarana') ||
+          j.nama.includes('Prasarana') ||
+          j.nama.includes('Aset') ||
+          j.nama.includes('Bidang') ||
+          j.nama.includes('Pewartaan') ||
+          (j.nama.toLowerCase().includes('anggota') && j.nama !== 'Anggota DPPH') ||
+          j.id.includes('sarana') ||
+          j.id.includes('aset') ||
+          j.id.includes('pewartaan') ||
+          j.id.includes('liturgi') ||
+          j.id.includes('paguyuban') ||
+          j.id.includes('pelayanan') ||
+          j.id.includes('tata-kelola'))
+      ) {
+        return false;
+      }
+
       // Filter kategori
       if (activeCategory !== 'all') {
         if (activeCategory === 'pastor_paroki' || activeCategory === 'vikaris') {
@@ -262,7 +282,7 @@ export const MasterJabatanModal: React.FC<MasterJabatanModalProps> = ({
                       setFormNama(e.target.value);
                       if (formError) setFormError('');
                     }}
-                    placeholder="Contoh: Wakil Koordinator Seksi / Anggota DPPH..."
+                    placeholder="Contoh: Wakil Koordinator Seksi / Anggota..."
                     className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
                   />
                   {formError && <p className="text-[10px] text-rose-600 font-bold">{formError}</p>}

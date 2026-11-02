@@ -11,6 +11,7 @@ import {
   Copy,
   Clock,
   CheckCircle2,
+  Sparkles,
 } from 'lucide-react';
 import { ProgramKerja, ProgramStatus } from '../types/proker';
 import {
@@ -89,8 +90,21 @@ export const ProgramCard: React.FC<ProgramCardProps> = ({
         </div>
       </div>
 
-      {/* Nama Program */}
-      <div>
+      {/* Nama Program & Tag Luar Rancangan */}
+      <div className="space-y-1">
+        {program.isLuarRancangan && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 shadow-2xs">
+              <Sparkles className="w-3 h-3 text-amber-600" />
+              <span>Di Luar Rancangan (Terlaksana)</span>
+            </span>
+            {program.alasanLuarRancangan && (
+              <span className="text-[10.5px] text-amber-800 font-medium italic">
+                · {program.alasanLuarRancangan}
+              </span>
+            )}
+          </div>
+        )}
         <h3 className="text-base font-bold text-slate-900 leading-snug">
           {program.namaProgram}
         </h3>
