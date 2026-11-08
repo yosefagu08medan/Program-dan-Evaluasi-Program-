@@ -457,13 +457,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           )}
 
-          {/* Penerimaan Kas Mingguan button */}
-          {onOpenPenerimaanTab && (
+          {/* Penerimaan Kas Mingguan button (Pastor Paroki / Admin & Bendahara) */}
+          {onOpenPenerimaanTab && (authSession?.role === 'pastor_paroki' || authSession?.role === 'bendahara') && (
             <button
               type="button"
               onClick={onOpenPenerimaanTab}
               className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10.5px] font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
-              title="Buka Menu Penerimaan Kas Mingguan (Rancangan & Realisasi)"
+              title="Buka Menu Penerimaan Kas Mingguan (Rancangan & Realisasi) - Pastor Paroki / Admin & Bendahara"
             >
               <Wallet className="w-3.5 h-3.5 text-emerald-700" />
               <span>Penerimaan Kas (Mingguan)</span>

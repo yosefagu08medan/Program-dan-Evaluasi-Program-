@@ -21,10 +21,19 @@ import {
 } from 'lucide-react';
 import {
   PenerimaanMingguan,
+  KategoriPenerimaan,
   calculateKolekte1Split,
 } from '../types/penerimaan';
 import { AuthSession } from '../types/auth';
-import { BULAN_LIST, formatRupiah, parseRupiahInput } from '../utils/formatters';
+import {
+  BULAN_LIST,
+  formatRupiah,
+  parseRupiahInput,
+  formatIndonesianDate,
+  getSundaysInMonth,
+  SundayInfo,
+  HARI_KHUSUS_PRESETS,
+} from '../utils/formatters';
 
 interface WeekKolekteRow {
   mingguKe: 1 | 2 | 3 | 4 | 5;
@@ -48,7 +57,8 @@ interface WeekKolekteRow {
 interface KolekteKhususRow {
   id: string;
   mingguKe: 1 | 2 | 3 | 4 | 5;
-  tanggal: string;
+  tanggal: string; // Tanggal kalender bebas untuk hari perayaan khusus
+  kategori: KategoriPenerimaan; // 'kolekte_khusus' | 'kolekte_1' | 'kolekte_2'
   namaPenerimaan: string;
   rancangan: number;
   rancanganStr: string;
@@ -92,24 +102,29 @@ export const MonthlyKolekteMatrix: React.FC<MonthlyKolekteMatrixProps> = ({
   // Saving states
   const [isSavingAll, setIsSavingAll] = useState<boolean>(false);
   const [savingWeek, setSavingWeek] = useState<number | null>(null);
+  const [savingKhususId, setSavingKhususId] = useState<string | null>(null);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
   const namaBulanAktif = BULAN_LIST[bulan - 1]?.nama || `Bulan ${bulan}`;
 
-  // Inisialisasi baris minggu & khusus saat tahun atau bulan berubah
+  // Kalender Hari Minggu Riil dalam bulan terpilih
+  const sundays = useMemo(() => getSundaysInMonth(tahun, bulan), [tahun, bulan]);
+
+  // Inisialisasi baris minggu kalender hari Minggu & hari khusus saat tahun atau bulan berubah
   useEffect(() => {
-    const newRows: WeekKolekteRow[] = ([1, 2, 3, 4, 5] as const).map((w) => {
-      const estDay = Math.min(28, (w - 1) * 7 + 4);
-      const estMonthStr = String(bulan).padStart(2, '0');
-      const estDayStr = String(estDay).padStart(2, '0');
-      const defaultTgl = `${tahun}-${estMonthStr}-${estDayStr}`;
+    const currentSundays = getSundaysInMonth(tahun, bulan);
+
+    const newRows: WeekKolekteRow[] = currentSundays.map((sun) => {
+      const w = sun.mingguKe;
+      const defaultTgl = sun.tanggal; // Hari Minggu riil dari kalender
 
       const existingK1 = penerimaanList.find(
         (p) =>
           p.tahun === tahun &&
           p.bulan === bulan &&
           p.mingguKe === w &&
-          p.kategori === 'kolekte_1'
+          p.kategori === 'kolekte_1' &&
+          !p.isHariKhusus
       );
 
       const existingK2 = penerimaanList.find(
@@ -117,7 +132,8 @@ export const MonthlyKolekteMatrix: React.FC<MonthlyKolekteMatrixProps> = ({
           p.tahun === tahun &&
           p.bulan === bulan &&
           p.mingguKe === w &&
-          p.kategori === 'kolekte_2'
+          p.kategori === 'kolekte_2' &&
+          !p.isHariKhusus
       );
 
       const k1R = existingK1 ? existingK1.rancangan || 0 : 12000000;
@@ -145,18 +161,32 @@ export const MonthlyKolekteMatrix: React.FC<MonthlyKolekteMatrixProps> = ({
 
     setRows(newRows);
 
-    // Ambil Kolekte Khusus yang ada pada bulan dan tahun ini
-    const existingKhusus = penerimaanList
+    // Bersihkan record kolekte rutin yang melebihi jumlah hari Minggu di kalender (misal: minggu 5 di bulan dengan 4 minggu)
+    const dangling = penerimaanList.filter(
+      (p) =>
+        p.tahun === tahun &&
+        p.bulan === bulan &&
+        !p.isHariKhusus &&
+        (p.kategori === 'kolekte_1' || p.kategori === 'kolekte_2') &&
+        p.mingguKe > currentSundays.length
+    );
+    if (dangling.length > 0) {
+      dangling.forEach((d) => onDeletePenerimaan(d.id));
+    }
+
+    // Ambil Kolekte Khusus / Hari Khusus di luar rutin hari Minggu pada bulan ini
+    const existingKhusus: KolekteKhususRow[] = penerimaanList
       .filter(
         (p) =>
           p.tahun === tahun &&
           p.bulan === bulan &&
-          p.kategori === 'kolekte_khusus'
+          (p.kategori === 'kolekte_khusus' || p.isHariKhusus)
       )
       .map((k) => ({
         id: k.id,
-        mingguKe: k.mingguKe,
+        mingguKe: (k.mingguKe as 1 | 2 | 3 | 4 | 5) || 1,
         tanggal: k.tanggal,
+        kategori: k.kategori || 'kolekte_khusus',
         namaPenerimaan: k.namaPenerimaan,
         rancangan: k.rancangan || 0,
         rancanganStr: k.rancangan ? k.rancangan.toLocaleString('id-ID') : '0',
@@ -249,19 +279,28 @@ export const MonthlyKolekteMatrix: React.FC<MonthlyKolekteMatrixProps> = ({
     );
   };
 
-  // Tambah baris Kolekte Khusus di bulan ini
-  const handleAddKhususRow = () => {
+  // Tambah baris Kolekte Hari Khusus di luar rutin hari Minggu di bulan ini
+  const handleAddKhususRow = (presetNama?: string) => {
     const estMonthStr = String(bulan).padStart(2, '0');
+    let defaultDay = '15';
+    const lower = (presetNama || '').toLowerCase();
+    if (lower.includes('24 des')) defaultDay = '24';
+    else if (lower.includes('25 des') || lower.includes('natal')) defaultDay = '25';
+    else if (lower.includes('31 des') || lower.includes('tutup tahun')) defaultDay = '31';
+    else if (lower.includes('1 jan') || lower.includes('bunda allah')) defaultDay = '01';
+    else if (lower.includes('8 des') || lower.includes('pelindung')) defaultDay = '08';
+
     const newKhusus: KolekteKhususRow = {
       id: `khusus_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       mingguKe: 1,
-      tanggal: `${tahun}-${estMonthStr}-01`,
-      namaPenerimaan: `Kolekte Khusus Hari Raya / Liturgi (${namaBulanAktif})`,
+      tanggal: `${tahun}-${estMonthStr}-${defaultDay}`,
+      kategori: 'kolekte_khusus',
+      namaPenerimaan: presetNama || `Misa Hari Khusus (${namaBulanAktif})`,
       rancangan: 8000000,
       rancanganStr: '8.000.000',
       realisasi: 0,
       realisasiStr: '',
-      keterangan: 'Kolekte khusus misa perayaan liturgi',
+      keterangan: 'Kolekte misa hari perayaan khusus / liturgi di luar hari Minggu rutin',
       isNew: true,
     };
     setKhususRows((prev) => [...prev, newKhusus]);
@@ -287,7 +326,11 @@ export const MonthlyKolekteMatrix: React.FC<MonthlyKolekteMatrixProps> = ({
     );
   };
 
-  const handleUpdateKhususField = (id: string, field: 'namaPenerimaan' | 'mingguKe' | 'tanggal', value: any) => {
+  const handleUpdateKhususField = (
+    id: string,
+    field: 'namaPenerimaan' | 'mingguKe' | 'tanggal' | 'kategori' | 'keterangan',
+    value: any
+  ) => {
     setKhususRows((prev) =>
       prev.map((k) => (k.id === id ? { ...k, [field]: value } : k))
     );
@@ -295,11 +338,48 @@ export const MonthlyKolekteMatrix: React.FC<MonthlyKolekteMatrixProps> = ({
 
   const handleDeleteKhususRow = async (id: string, isNew?: boolean) => {
     if (!isNew) {
-      if (window.confirm('Hapus pos Kolekte Khusus ini secara permanen?')) {
+      if (window.confirm('Hapus pos Kolekte Hari Khusus ini secara permanen?')) {
         await onDeletePenerimaan(id);
       }
     }
     setKhususRows((prev) => prev.filter((k) => k.id !== id));
+  };
+
+  // Simpan 1 baris Kolekte Hari Khusus langsung ke database
+  const handleSaveKhususRow = async (k: KolekteKhususRow) => {
+    try {
+      setSavingKhususId(k.id);
+      const itemKhusus: PenerimaanMingguan = {
+        id: k.id,
+        tahun,
+        bulan,
+        mingguKe: k.mingguKe || 1,
+        tanggal: k.tanggal,
+        kategori: k.kategori || 'kolekte_khusus',
+        namaPenerimaan: k.namaPenerimaan.trim(),
+        rancangan: k.rancangan,
+        realisasi: k.realisasi,
+        alokasiSeksi: 'Umum Paroki',
+        tipeSumber: 'paroki',
+        isTentatif: false,
+        isHariKhusus: true,
+        namaHariKhusus: k.namaPenerimaan.trim(),
+        keterangan: k.keterangan.trim() || undefined,
+        pencatat: 'Bendahara Paroki',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await onSavePenerimaan(itemKhusus);
+      setKhususRows((prev) =>
+        prev.map((item) => (item.id === k.id ? { ...item, isNew: false } : item))
+      );
+      setSaveSuccessMsg(`Data kolekte "${k.namaPenerimaan}" berhasil disimpan!`);
+      setTimeout(() => setSaveSuccessMsg(null), 3000);
+    } catch (err: any) {
+      alert(`Gagal menyimpan: ${err?.message || 'Terjadi kesalahan'}`);
+    } finally {
+      setSavingKhususId(null);
+    }
   };
 
   // Simpan 1 minggu spesifik
@@ -410,22 +490,24 @@ export const MonthlyKolekteMatrix: React.FC<MonthlyKolekteMatrixProps> = ({
         }
       }
 
-      // Simpan Kolekte Khusus Bulan Ini
+      // Simpan Kolekte Hari Khusus Bulan Ini
       for (const k of khususRows) {
-        if (k.rancangan > 0 || k.realisasi > 0) {
+        if (k.rancangan > 0 || k.realisasi > 0 || !k.isNew) {
           const itemKhusus: PenerimaanMingguan = {
             id: k.id,
             tahun,
             bulan,
-            mingguKe: k.mingguKe,
+            mingguKe: k.mingguKe || 1,
             tanggal: k.tanggal,
-            kategori: 'kolekte_khusus',
+            kategori: k.kategori || 'kolekte_khusus',
             namaPenerimaan: k.namaPenerimaan.trim(),
             rancangan: k.rancangan,
             realisasi: k.realisasi,
             alokasiSeksi: 'Umum Paroki',
             tipeSumber: 'paroki',
             isTentatif: false,
+            isHariKhusus: true,
+            namaHariKhusus: k.namaPenerimaan.trim(),
             keterangan: k.keterangan.trim() || undefined,
             pencatat: 'Bendahara Paroki',
             createdAt: new Date().toISOString(),
@@ -625,19 +707,30 @@ export const MonthlyKolekteMatrix: React.FC<MonthlyKolekteMatrixProps> = ({
 
               return (
                 <tr key={row.mingguKe} className="hover:bg-slate-50/80 transition-colors">
-                  {/* Kolom 1: Minggu & Tanggal */}
+                  {/* Kolom 1: Minggu & Tanggal Hari Minggu Kalender */}
                   <td className="py-3 px-3 align-top font-bold text-slate-800">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-6 h-6 rounded-lg bg-slate-100 text-slate-800 flex items-center justify-center font-black text-xs">
+                    <div className="flex items-start gap-1.5">
+                      <span className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
                         M{row.mingguKe}
                       </span>
-                      <span className="text-xs font-black">Minggu ke-{row.mingguKe}</span>
+                      <div className="min-w-0">
+                        <span className="text-xs font-black text-slate-900 block leading-tight">
+                          Minggu ke-{row.mingguKe}
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 inline-block mt-0.5 whitespace-nowrap">
+                          🗓️ Hari Minggu
+                        </span>
+                        <div className="text-[11px] font-bold text-slate-700 mt-1 leading-tight">
+                          {formatIndonesianDate(row.tanggal, true)}
+                        </div>
+                      </div>
                     </div>
                     <input
                       type="date"
                       value={row.tanggal}
                       onChange={(e) => handleUpdateText(row.mingguKe, 'tanggal', e.target.value)}
                       className="mt-1.5 px-2 py-1 bg-white border border-slate-300 rounded-lg text-[11px] font-medium text-slate-700 w-full focus:outline-none focus:border-emerald-600"
+                      title="Tanggal Hari Minggu Riil"
                     />
                   </td>
 
@@ -886,115 +979,236 @@ export const MonthlyKolekteMatrix: React.FC<MonthlyKolekteMatrixProps> = ({
         </table>
       </div>
 
-      {/* 3. BAGIAN KOLEKTE KHUSUS BULAN INI (Bila Diperlukan) */}
-      <div className="px-4 sm:px-6 pt-2 pb-2 border-t border-slate-200 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center font-black text-xs">
-              <Coins className="w-3.5 h-3.5" />
+      {/* 3. BAGIAN KOLEKTE HARI KHUSUS (DI LUAR HARI MINGGU RUTIN) */}
+      <div className="px-4 sm:px-6 pt-3 pb-3 border-t border-slate-200 space-y-3 bg-gradient-to-b from-purple-50/30 to-white rounded-2xl mx-2 sm:mx-4 my-2 border">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <span className="w-8 h-8 rounded-xl bg-purple-100 text-purple-800 flex items-center justify-center font-black text-sm shrink-0 mt-0.5 shadow-xs">
+              <Sparkles className="w-4 h-4 text-purple-700" />
             </span>
             <div>
-              <h4 className="text-xs sm:text-sm font-black text-slate-900">
-                Kolekte Khusus {namaBulanAktif} (Misa Hari Raya / Liturgi Khusus)
-              </h4>
-              <p className="text-[10.5px] text-slate-500 font-medium">
-                Tambahkan baris jika terdapat perayaan hari raya tertentu (Natal, Paskah, Krisma, atau misa khusus) pada bulan ini.
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-black text-slate-900">
+                  Kolekte &amp; Penerimaan Misa Hari Khusus (Di Luar Hari Minggu Rutin)
+                </h4>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-200">
+                  {khususRows.length} Terdaftar
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600 font-medium mt-0.5">
+                Khusus perayaan di luar hari Minggu rutin (Kamis Putih, Jumat Agung, Malam Paskah, Hari Raya Natal, Misa Tutup Tahun, Hari Kenaikan, dll.). Bebas pilih tanggal kalender &amp; jenis kolekte.
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleAddKhususRow}
-            className="px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-black border border-purple-200 flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>+ Tambah Kolekte Khusus Bulan Ini</span>
-          </button>
+          {/* Tombol & Dropdown Tambah Hari Khusus */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleAddKhususRow(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl bg-white text-purple-900 text-xs font-bold border border-purple-300 shadow-2xs hover:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+            >
+              <option value="" disabled>
+                ⚡ Pilih Cepat Hari Raya...
+              </option>
+              {HARI_KHUSUS_PRESETS.map((preset) => (
+                <option key={preset} value={preset}>
+                  {preset}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => handleAddKhususRow()}
+              className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>+ Tambah Hari Khusus</span>
+            </button>
+          </div>
         </div>
 
-        {/* Tabel Kolekte Khusus (Jika Ada) */}
-        {khususRows.length > 0 && (
-          <div className="overflow-x-auto bg-purple-50/40 rounded-2xl border border-purple-200 p-3">
-            <table className="w-full text-left border-collapse min-w-[700px]">
+        {/* Tabel Kolekte Hari Khusus */}
+        {khususRows.length > 0 ? (
+          <div className="overflow-x-auto bg-white rounded-2xl border border-purple-200 shadow-xs p-3">
+            <table className="w-full text-left border-collapse min-w-[840px]">
               <thead>
-                <tr className="text-[10px] font-black uppercase text-purple-950 pb-2 border-b border-purple-200">
-                  <th className="pb-1.5 pr-2">Uraian Kolekte Khusus</th>
-                  <th className="pb-1.5 px-2 w-28">Minggu Ke-</th>
-                  <th className="pb-1.5 px-2 w-36">Target Rencana (Rp)</th>
-                  <th className="pb-1.5 px-2 w-36">Realisasi Aktual (Rp)</th>
-                  <th className="pb-1.5 pl-2 text-center w-16">Hapus</th>
+                <tr className="text-[10px] font-black uppercase text-purple-950 pb-2 border-b-2 border-purple-200 bg-purple-50/50">
+                  <th className="py-2 px-2.5 rounded-l-lg w-56">Nama Perayaan / Hari Khusus</th>
+                  <th className="py-2 px-2.5 w-44">Tanggal Misa Riil</th>
+                  <th className="py-2 px-2.5 w-44">Jenis Kolekte</th>
+                  <th className="py-2 px-2.5 w-36">Target Rencana (Rp)</th>
+                  <th className="py-2 px-2.5 w-36">Realisasi Aktual (Rp)</th>
+                  <th className="py-2 px-2.5">Catatan / Misa</th>
+                  <th className="py-2 px-2 rounded-r-lg text-center w-28">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-purple-100 text-xs">
-                {khususRows.map((k) => (
-                  <tr key={k.id}>
-                    <td className="py-2 pr-2">
-                      <input
-                        type="text"
-                        value={k.namaPenerimaan}
-                        onChange={(e) => handleUpdateKhususField(k.id, 'namaPenerimaan', e.target.value)}
-                        placeholder="Contoh: Kolekte Khusus Misa Hari Raya Paskah"
-                        className="w-full px-2.5 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-bold text-slate-900 focus:outline-none focus:border-purple-600"
-                      />
-                    </td>
-                    <td className="py-2 px-2">
-                      <select
-                        value={k.mingguKe}
-                        onChange={(e) =>
-                          handleUpdateKhususField(k.id, 'mingguKe', Number(e.target.value) as 1 | 2 | 3 | 4 | 5)
-                        }
-                        className="w-full px-2 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-bold text-slate-900 focus:outline-none focus:border-purple-600"
-                      >
-                        <option value={1}>Minggu I</option>
-                        <option value={2}>Minggu II</option>
-                        <option value={3}>Minggu III</option>
-                        <option value={4}>Minggu IV</option>
-                        <option value={5}>Minggu V</option>
-                      </select>
-                    </td>
-                    <td className="py-2 px-2">
-                      <div className="relative">
-                        <span className="absolute left-2.5 top-1.5 text-[11px] font-bold text-slate-400">Rp</span>
+                {khususRows.map((k) => {
+                  const isSavingThisKhusus = savingKhususId === k.id;
+                  return (
+                    <tr key={k.id} className="hover:bg-purple-50/30 transition-colors">
+                      {/* Nama Perayaan */}
+                      <td className="py-2.5 px-2.5 align-top">
                         <input
                           type="text"
-                          value={k.rancanganStr}
+                          value={k.namaPenerimaan}
                           onChange={(e) =>
-                            handleUpdateKhususNominal(k.id, 'rancangan', e.target.value)
+                            handleUpdateKhususField(k.id, 'namaPenerimaan', e.target.value)
                           }
-                          placeholder="0"
-                          className="w-full pl-8 pr-2 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-black text-slate-900 focus:outline-none focus:border-purple-600"
+                          placeholder="Contoh: Kamis Putih / Jumat Agung"
+                          className="w-full px-2.5 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-bold text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-600"
                         />
-                      </div>
-                    </td>
-                    <td className="py-2 px-2">
-                      <div className="relative">
-                        <span className="absolute left-2.5 top-1.5 text-[11px] font-bold text-slate-400">Rp</span>
+                        <span className="text-[9.5px] font-bold text-purple-700 mt-1 block">
+                          ⭐ Di luar jadwal Minggu rutin
+                        </span>
+                      </td>
+
+                      {/* Tanggal Misa Bebas Kalender */}
+                      <td className="py-2.5 px-2.5 align-top">
+                        <input
+                          type="date"
+                          value={k.tanggal}
+                          onChange={(e) =>
+                            handleUpdateKhususField(k.id, 'tanggal', e.target.value)
+                          }
+                          className="w-full px-2 py-1 bg-white border border-purple-200 rounded-lg text-[11px] font-semibold text-slate-800 focus:outline-none focus:border-purple-600"
+                        />
+                        <div className="text-[10px] font-bold text-purple-900 mt-1">
+                          {formatIndonesianDate(k.tanggal, true)}
+                        </div>
+                      </td>
+
+                      {/* Kategori Kolekte */}
+                      <td className="py-2.5 px-2.5 align-top">
+                        <select
+                          value={k.kategori || 'kolekte_khusus'}
+                          onChange={(e) =>
+                            handleUpdateKhususField(
+                              k.id,
+                              'kategori',
+                              e.target.value as KategoriPenerimaan
+                            )
+                          }
+                          className="w-full px-2 py-1.5 bg-white border border-purple-200 rounded-lg text-[11px] font-bold text-slate-900 focus:outline-none focus:border-purple-600"
+                        >
+                          <option value="kolekte_khusus">
+                            Kolekte Khusus (Persembahan Kasih)
+                          </option>
+                          <option value="kolekte_1">
+                            Kolekte I Hari Raya (50:50)
+                          </option>
+                          <option value="kolekte_2">
+                            Kolekte II Hari Raya (100% Pembangunan)
+                          </option>
+                        </select>
+                      </td>
+
+                      {/* Target Rencana */}
+                      <td className="py-2.5 px-2.5 align-top">
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1.5 text-[11px] font-bold text-slate-400">
+                            Rp
+                          </span>
+                          <input
+                            type="text"
+                            value={k.rancanganStr}
+                            onChange={(e) =>
+                              handleUpdateKhususNominal(k.id, 'rancangan', e.target.value)
+                            }
+                            placeholder="0"
+                            className="w-full pl-8 pr-2 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-black text-slate-900 focus:outline-none focus:border-purple-600"
+                          />
+                        </div>
+                      </td>
+
+                      {/* Realisasi Aktual */}
+                      <td className="py-2.5 px-2.5 align-top">
+                        <div className="flex items-center justify-between mb-0.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleUpdateKhususNominal(k.id, 'realisasi', String(k.rancangan))
+                            }
+                            className="text-[9px] font-bold text-purple-700 hover:underline cursor-pointer ml-auto"
+                            title="Samakan dengan target"
+                          >
+                            = Rencana
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1.5 text-[11px] font-bold text-slate-400">
+                            Rp
+                          </span>
+                          <input
+                            type="text"
+                            value={k.realisasiStr}
+                            onChange={(e) =>
+                              handleUpdateKhususNominal(k.id, 'realisasi', e.target.value)
+                            }
+                            placeholder="0"
+                            className="w-full pl-8 pr-2 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-black text-purple-950 focus:outline-none focus:border-purple-600"
+                          />
+                        </div>
+                      </td>
+
+                      {/* Catatan / Keterangan */}
+                      <td className="py-2.5 px-2.5 align-top">
                         <input
                           type="text"
-                          value={k.realisasiStr}
+                          value={k.keterangan || ''}
                           onChange={(e) =>
-                            handleUpdateKhususNominal(k.id, 'realisasi', e.target.value)
+                            handleUpdateKhususField(k.id, 'keterangan', e.target.value)
                           }
-                          placeholder="0"
-                          className="w-full pl-8 pr-2 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-black text-purple-950 focus:outline-none focus:border-purple-600"
+                          placeholder="Misa sore/malam..."
+                          className="w-full px-2 py-1.5 bg-white border border-purple-200 rounded-lg text-xs text-slate-700 focus:outline-none focus:border-purple-600"
                         />
-                      </div>
-                    </td>
-                    <td className="py-2 pl-2 text-center">
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteKhususRow(k.id, k.isNew)}
-                        className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer"
-                        title="Hapus baris kolekte khusus ini"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+
+                      {/* Aksi Baris */}
+                      <td className="py-2.5 px-2 align-top text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveKhususRow(k)}
+                            disabled={isSavingThisKhusus}
+                            className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                            title="Simpan baris hari khusus ini"
+                          >
+                            <Save className="w-3 h-3" />
+                            <span>{isSavingThisKhusus ? '...' : 'Simpan'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteKhususRow(k.id, k.isNew)}
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer"
+                            title="Hapus baris kolekte hari khusus ini"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          </div>
+        ) : (
+          <div className="p-4 bg-white rounded-2xl border border-dashed border-purple-200 text-center space-y-1">
+            <p className="text-xs font-bold text-slate-700">
+              Belum ada kolekte hari khusus yang dicatatkan di bulan {namaBulanAktif} {tahun}.
+            </p>
+            <p className="text-[11px] text-slate-500">
+              Jika terdapat perayaan liturgi yang jatuh di luar hari Minggu (misal Pekan Suci, Hari Raya Natal, Tutup Tahun, atau Pelindung Paroki), pilih perayaan dari tombol &quot;Pilih Cepat Hari Raya&quot; di atas untuk mencatat rencana &amp; realisasinya.
+            </p>
           </div>
         )}
       </div>

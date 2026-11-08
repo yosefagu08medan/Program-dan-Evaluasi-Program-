@@ -176,6 +176,88 @@ export function generateJadwalBulanan(
   return result;
 }
 
+export interface SundayInfo {
+  mingguKe: 1 | 2 | 3 | 4 | 5;
+  dayOfMonth: number;
+  tanggal: string; // YYYY-MM-DD
+  labelShort: string; // e.g. "Minggu I - 4 Jan"
+  labelFull: string; // e.g. "Minggu I - 4 Januari 2026"
+}
+
+/**
+ * Menghasilkan daftar tanggal hari Minggu riil dalam satu bulan kalender.
+ * Menghitung hari di mana getDay() === 0 (Hari Minggu) sesuai kalender resmi.
+ */
+export function getSundaysInMonth(year: number, month: number): SundayInfo[] {
+  const sundays: SundayInfo[] = [];
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const romawi = ['I', 'II', 'III', 'IV', 'V'];
+  const monthName = BULAN_LIST[month - 1]?.nama || `Bulan ${month}`;
+  const monthShort = BULAN_LIST[month - 1]?.singkatan || `Bln ${month}`;
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const d = new Date(year, month - 1, day);
+    if (d.getDay() === 0) {
+      const idx = sundays.length;
+      if (idx < 5) {
+        const mKe = (idx + 1) as 1 | 2 | 3 | 4 | 5;
+        const rom = romawi[idx] || `${idx + 1}`;
+        const dayStr = String(day).padStart(2, '0');
+        const monthStr = String(month).padStart(2, '0');
+        const iso = `${year}-${monthStr}-${dayStr}`;
+        sundays.push({
+          mingguKe: mKe,
+          dayOfMonth: day,
+          tanggal: iso,
+          labelShort: `Minggu ${rom} - ${day} ${monthShort}`,
+          labelFull: `Minggu ${rom} - ${day} ${monthName} ${year}`,
+        });
+      }
+    }
+  }
+
+  // Fallback jika karena suatu hal kalender belum terhitung (misal invalid params)
+  if (sundays.length === 0) {
+    for (let i = 1; i <= 4; i++) {
+      const approxDay = (i - 1) * 7 + 1;
+      const mStr = String(month).padStart(2, '0');
+      const dStr = String(approxDay).padStart(2, '0');
+      sundays.push({
+        mingguKe: i as 1 | 2 | 3 | 4 | 5,
+        dayOfMonth: approxDay,
+        tanggal: `${year}-${mStr}-${dStr}`,
+        labelShort: `Minggu ${romawi[i - 1]} - ${approxDay} ${monthShort}`,
+        labelFull: `Minggu ${romawi[i - 1]} - ${approxDay} ${monthName} ${year}`,
+      });
+    }
+  }
+
+  return sundays;
+}
+
+export const HARI_KHUSUS_PRESETS = [
+  'Kamis Putih (Trihari Suci)',
+  'Jumat Agung (Penghormatan Salib)',
+  'Malam Paskah (Vigili Paskah)',
+  'Hari Raya Kenaikan Tuhan Yesus',
+  'Malam Natal (Vigili Natal - 24 Des)',
+  'Hari Raya Natal (Kelahiran Tuhan - 25 Des)',
+  'Misa Tutup Tahun (31 Des)',
+  'Hari Raya Santa Maria Bunda Allah (1 Jan)',
+  'Hari Raya Penampakan Tuhan (Epifani)',
+  'Rabu Abu (Awal Masa Prapaskah)',
+  'Hari Raya Pentakosta (Turunnya Roh Kudus)',
+  'Hari Raya Tritunggal Mahakudus',
+  'Hari Raya Tubuh dan Darah Kristus',
+  'Pesta Pelindung Paroki Katedral (8 Des - Maria Dikandung Tanpa Noda)',
+  'Misa Krisma (Pemberkatan Minyak Suci)',
+  'Misa Penerimaan Sakramen Penguatan (Krisma)',
+  'Misa Syukur Ulang Tahun Imamat / Tahbisan',
+  'Misa Hari Anak Misioner (KKI)',
+  'Misa Hari Minggu Panggilan',
+  'Lainnya (Misa Perayaan Khusus)',
+];
+
 export function getTipeJadwalLabel(type: ScheduleType): string {
   switch (type) {
     case 'sepanjang_tahun':

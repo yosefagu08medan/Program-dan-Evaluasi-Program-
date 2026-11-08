@@ -24,13 +24,17 @@ import {
   Repeat,
   Check,
   ShieldCheck,
+  Coins,
+  FileText,
 } from 'lucide-react';
-import { ProgramKerja, ScheduleType, ProgramStatus } from '../types/proker';
+import { ProgramKerja, ScheduleType, ProgramStatus, KategoriProgram } from '../types/proker';
 import { AuthSession } from '../types/auth';
 import {
   BULAN_LIST,
   formatRupiah,
+  formatCompactRupiah,
   getStatusInfo,
+  getKategoriProgramInfo,
   isDivisionMatch,
 } from '../utils/formatters';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
@@ -69,7 +73,8 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
   const [editingProg2027Id, setEditingProg2027Id] = useState<string | null>(null);
   const [adopted2026Prog, setAdopted2026Prog] = useState<ProgramKerja | null>(preselectedProgram2026);
   
-  // Form fields
+  // Form fields (sinkron dengan input_program)
+  const [kategoriProgram, setKategoriProgram] = useState<KategoriProgram>('program_biasa');
   const [namaProgram, setNamaProgram] = useState<string>('');
   const [tujuanKegiatan, setTujuanKegiatan] = useState<string>('');
   const [targetSasaran, setTargetSasaran] = useState<string>('');
@@ -77,6 +82,8 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
   const [tipeJadwal, setTipeJadwal] = useState<ScheduleType>('satu_kali');
   const [selectedMonths, setSelectedMonths] = useState<number[]>([1]);
   const [tanggalSpesifik, setTanggalSpesifik] = useState<string>('');
+  const [catatanBulanan, setCatatanBulanan] = useState<Record<number, string>>({});
+  const [alokasiDanaBulanan, setAlokasiDanaBulanan] = useState<Record<number, number>>({});
   const [tindakLanjutKendala, setTindakLanjutKendala] = useState<string>('');
   const [isLuarRancangan, setIsLuarRancangan] = useState<boolean>(false);
   const [picNama, setPicNama] = useState<string>('');
@@ -159,10 +166,55 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
     };
   }, [programs2026, programs2027]);
 
+  // Ganti Kategori Program
+  const handleKategoriProgramChange = (kat: KategoriProgram) => {
+    setKategoriProgram(kat);
+    if (kat === 'program_rutin') {
+      if (tipeJadwal === 'satu_kali') {
+        setTipeJadwal('sepanjang_tahun');
+        setSelectedMonths([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+      }
+    }
+  };
+
+  // Helper Ubah Catatan Bulanan
+  const handleCatatanBulananChange = (monthNo: number, note: string) => {
+    setCatatanBulanan((prev) => ({
+      ...prev,
+      [monthNo]: note,
+    }));
+  };
+
+  // Helper Ubah Alokasi Dana Bulanan
+  const handleAlokasiDanaBulananChange = (monthNo: number, valStr: string) => {
+    const cleanNum = parseInt(valStr.replace(/\D/g, ''), 10) || 0;
+    setAlokasiDanaBulanan((prev) => ({
+      ...prev,
+      [monthNo]: cleanNum,
+    }));
+  };
+
+  // Helper Bagi Rata Anggaran ke Bulan Aktif
+  const handleDistributeEqualBudget = () => {
+    const total = Number(estimasiAnggaran) || 0;
+    if (total <= 0) return;
+    const activeMonths = tipeJadwal === 'sepanjang_tahun'
+      ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      : selectedMonths.length > 0 ? selectedMonths : [1];
+
+    const perMonth = Math.round(total / activeMonths.length);
+    const newMap: Record<number, number> = {};
+    activeMonths.forEach((m) => {
+      newMap[m] = perMonth;
+    });
+    setAlokasiDanaBulanan(newMap);
+  };
+
   // Aksi Cepat: Adopsi program 2026 ke formulir rancangan 2027
   const handleAdoptProgram = (prog2026: ProgramKerja) => {
     setEditingProg2027Id(null);
     setAdopted2026Prog(prog2026);
+    setKategoriProgram(prog2026.kategoriProgram || 'program_biasa');
     setNamaProgram(prog2026.namaProgram);
     setTujuanKegiatan(prog2026.tujuanKegiatan || '');
     setTargetSasaran(prog2026.targetSasaran || '');
@@ -170,6 +222,8 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
     setTipeJadwal(prog2026.tipeJadwal || 'satu_kali');
     setSelectedMonths(prog2026.bulanPelaksanaan && prog2026.bulanPelaksanaan.length > 0 ? [...prog2026.bulanPelaksanaan] : [1]);
     setTanggalSpesifik(prog2026.tanggalSpesifik || '');
+    setCatatanBulanan(prog2026.catatanBulanan ? { ...prog2026.catatanBulanan } : {});
+    setAlokasiDanaBulanan(prog2026.alokasiDanaBulanan ? { ...prog2026.alokasiDanaBulanan } : {});
     setIsLuarRancangan(false);
     setPicNama(prog2026.penanggungjawab?.nama || activeDivision?.defaultPic || '');
     setPicKontak(prog2026.penanggungjawab?.kontak || '');
@@ -189,6 +243,7 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
   const handleStartNew2027 = () => {
     setEditingProg2027Id(null);
     setAdopted2026Prog(null);
+    setKategoriProgram('program_biasa');
     setNamaProgram('');
     setTujuanKegiatan('');
     setTargetSasaran('');
@@ -196,6 +251,8 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
     setTipeJadwal('satu_kali');
     setSelectedMonths([1]);
     setTanggalSpesifik('');
+    setCatatanBulanan({});
+    setAlokasiDanaBulanan({});
     setTindakLanjutKendala('');
     setIsLuarRancangan(false);
     setPicNama(activeDivision?.defaultPic || '');
@@ -207,6 +264,7 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
   const handleEditProg2027 = (prog2027: ProgramKerja) => {
     setEditingProg2027Id(prog2027.id);
     setAdopted2026Prog(null);
+    setKategoriProgram(prog2027.kategoriProgram || 'program_biasa');
     setNamaProgram(prog2027.namaProgram);
     setTujuanKegiatan(prog2027.tujuanKegiatan || '');
     setTargetSasaran(prog2027.targetSasaran || '');
@@ -214,6 +272,8 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
     setTipeJadwal(prog2027.tipeJadwal || 'satu_kali');
     setSelectedMonths(prog2027.bulanPelaksanaan && prog2027.bulanPelaksanaan.length > 0 ? [...prog2027.bulanPelaksanaan] : [1]);
     setTanggalSpesifik(prog2027.tanggalSpesifik || '');
+    setCatatanBulanan(prog2027.catatanBulanan ? { ...prog2027.catatanBulanan } : {});
+    setAlokasiDanaBulanan(prog2027.alokasiDanaBulanan ? { ...prog2027.alokasiDanaBulanan } : {});
     setTindakLanjutKendala(prog2027.tindakLanjutKendala || '');
     setIsLuarRancangan(Boolean(prog2027.isLuarRancangan));
     setPicNama(prog2027.penanggungjawab?.nama || '');
@@ -258,6 +318,7 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
     const newProg: ProgramKerja = {
       id: progId,
       tahun: 2027,
+      kategoriProgram,
       namaProgram: namaProgram.trim(),
       tujuanKegiatan: tujuanKegiatan.trim(),
       targetSasaran: targetSasaran.trim(),
@@ -265,6 +326,8 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
       tipeJadwal,
       bulanPelaksanaan: selectedMonths.length > 0 ? selectedMonths : [1],
       tanggalSpesifik: tanggalSpesifik.trim() || undefined,
+      catatanBulanan: Object.keys(catatanBulanan).length > 0 ? catatanBulanan : undefined,
+      alokasiDanaBulanan: Object.keys(alokasiDanaBulanan).length > 0 ? alokasiDanaBulanan : undefined,
       penanggungjawab: {
         nama: picNama.trim() || activeDivision?.defaultPic || 'Koordinator Seksi',
         divisi: activeSeksi,
@@ -426,6 +489,17 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
                     <div className="flex items-start justify-between gap-2">
                       <div className="space-y-0.5">
                         <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                          {/* Badge Jenis Kategori Program (Rutin / Tentatif / Biasa) */}
+                          {(() => {
+                            const katInfo = getKategoriProgramInfo(p26.kategoriProgram);
+                            return (
+                              <span className={`px-2 py-0.5 rounded-full text-[9.5px] font-black border flex items-center gap-1 ${katInfo.badge}`}>
+                                <span>{katInfo.iconEmoji}</span>
+                                <span>{katInfo.label}</span>
+                              </span>
+                            );
+                          })()}
+
                           {isSelesai ? (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 flex items-center gap-0.5">
                               <CheckCircle2 className="w-3 h-3" />
@@ -467,6 +541,25 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
                       </span>
                       {p26.tanggalSpesifik && <span className="text-slate-400">({p26.tanggalSpesifik})</span>}
                     </div>
+
+                    {/* Catatan Per Bulan 2026 jika ada */}
+                    {p26.catatanBulanan && Object.keys(p26.catatanBulanan).length > 0 && (
+                      <div className="p-2 bg-emerald-50/70 rounded-lg border border-emerald-200/80 text-[10px] text-emerald-950 space-y-1">
+                        <span className="font-extrabold flex items-center gap-1 text-emerald-900">
+                          <FileText className="w-3 h-3 text-emerald-600" />
+                          <span>Catatan Kegiatan Tiap Bulan (2026):</span>
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 pl-1">
+                          {Object.entries(p26.catatanBulanan).map(([mNum, note]) => (
+                            note ? (
+                              <div key={mNum} className="text-[9.5px] bg-white/80 px-2 py-0.5 rounded border border-emerald-100">
+                                <strong className="text-emerald-900">{BULAN_LIST[Number(mNum) - 1]?.singkatan}:</strong> {note}
+                              </div>
+                            ) : null
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Sorotan Kendala Pelaksanaan */}
                     {kendala ? (
@@ -564,6 +657,93 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
 
           {/* Form Perancangan 2027 */}
           <form onSubmit={handleSubmitForm} className="space-y-4 text-xs">
+            {/* KATEGORI JENIS PROGRAM (3 PILIHAN: RUTIN, TENTATIF, BIASA) - SINKRON DENGAN SISTEM INPUT PROKER */}
+            <div className="space-y-2 p-3 bg-slate-50/90 rounded-xl border border-slate-200">
+              <div className="flex items-center justify-between">
+                <label className="block text-[11px] font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Jenis Kategori Program <span className="text-rose-500">*</span></span>
+                </label>
+                <span className="text-[10px] text-slate-500 font-medium">
+                  Identik dengan Formulir Proker Paroki
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {/* 1. Program Rutin */}
+                <button
+                  type="button"
+                  onClick={() => handleKategoriProgramChange('program_rutin')}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer relative ${
+                    kategoriProgram === 'program_rutin'
+                      ? 'bg-emerald-50/90 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
+                      : 'bg-white border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
+                      <Repeat className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>1. Program Rutin</span>
+                    </span>
+                    {kategoriProgram === 'program_rutin' && (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-[10px] text-emerald-900/80 leading-snug">
+                    Dilaksanakan berkala / rutin setiap bulan dengan rincian alokasi &amp; catatan per bulan.
+                  </p>
+                </button>
+
+                {/* 2. Opsional / Tentatif */}
+                <button
+                  type="button"
+                  onClick={() => handleKategoriProgramChange('program_tentatif')}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer relative ${
+                    kategoriProgram === 'program_tentatif'
+                      ? 'bg-purple-50/90 border-purple-500 ring-2 ring-purple-500/20 shadow-xs'
+                      : 'bg-white border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-black text-purple-950 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                      <span>2. Opsional / Tentatif</span>
+                    </span>
+                    {kategoriProgram === 'program_tentatif' && (
+                      <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-[10px] text-purple-900/80 leading-snug">
+                    Program cadangan / situasional, hanya akan digunakan jika diperlukan sewaktu-waktu.
+                  </p>
+                </button>
+
+                {/* 3. Program Biasa */}
+                <button
+                  type="button"
+                  onClick={() => handleKategoriProgramChange('program_biasa')}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer relative ${
+                    kategoriProgram === 'program_biasa'
+                      ? 'bg-slate-100/90 border-slate-500 ring-2 ring-slate-500/20 shadow-xs'
+                      : 'bg-white border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                      <span>3. Program Biasa</span>
+                    </span>
+                    {kategoriProgram === 'program_biasa' && (
+                      <CheckCircle2 className="w-4 h-4 text-slate-700 shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-600 leading-snug">
+                    Program kerja reguler standar paroki sesuai rencana kalender pastoral.
+                  </p>
+                </button>
+              </div>
+            </div>
+
             {/* Nama Program */}
             <div className="space-y-1">
               <label className="block text-[11px] font-bold text-slate-700">
@@ -732,68 +912,111 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
                 className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:border-indigo-600 focus:bg-white mt-1"
               />
 
-              {/* Rencana Penggunaan Anggaran 2027: Bagi Rata (Sepanjang Tahun) & Posisi (Multi Bulan) */}
-              {Number(estimasiAnggaran) > 0 && tipeJadwal === 'sepanjang_tahun' && (
-                <div className="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl space-y-1.5 mt-2">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-black text-indigo-950 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>Rencana Anggaran 2027: Dibagi Rata Tiap Bulan (12 Bulan)</span>
-                    </span>
-                    <strong className="text-indigo-900 font-extrabold">
-                      {formatRupiah(Math.round(Number(estimasiAnggaran) / 12))} / bulan
-                    </strong>
-                  </div>
-                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-1 text-center pt-1 text-[10px]">
-                    {BULAN_LIST.map((m) => (
-                      <div key={m.no} className="bg-white p-1 rounded-lg border border-indigo-100 shadow-2xs">
-                        <span className="font-bold text-slate-500 block">{m.singkatan}</span>
-                        <span className="font-black text-indigo-900 block truncate">
-                          {formatRupiah(Math.round(Number(estimasiAnggaran) / 12))}
+              {/* Rincian Alokasi Kas & Catatan Khusus Per Bulan Aktif (Sinkron dengan Sistem Input Proker Paroki) */}
+              {(() => {
+                const activeMonths = tipeJadwal === 'sepanjang_tahun'
+                  ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+                  : selectedMonths.length > 0 ? selectedMonths : [1];
+
+                const totalBudget = Number(estimasiAnggaran) || 0;
+                const allocatedTotal = activeMonths.reduce((sum, m) => {
+                  const val = alokasiDanaBulanan[m] !== undefined
+                    ? alokasiDanaBulanan[m]
+                    : (totalBudget > 0 ? Math.round(totalBudget / activeMonths.length) : 0);
+                  return sum + val;
+                }, 0);
+
+                return (
+                  <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2.5 mt-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <label className="text-[11px] font-black text-indigo-950 flex items-center gap-1.5">
+                          <Coins className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Rincian Pemakaian Dana &amp; Catatan Khusus Per Bulan ({activeMonths.length} Bulan Aktif):</span>
+                        </label>
+                        <p className="text-[10px] text-slate-500">
+                          Isi catatan khusus per bulan (misal: "Feb: Pembentukan Panitia", "Mar: Pelaksanaan &amp; Pencairan Dana") dan sesuaikan nominal pemakaian dana jika tidak dicairkan sekaligus.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleDistributeEqualBudget}
+                          className="px-2 py-1 bg-white hover:bg-slate-100 text-indigo-900 border border-indigo-300 rounded-lg text-[10.5px] font-extrabold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                          title="Bagi rata anggaran ke semua bulan aktif"
+                        >
+                          <RotateCcw className="w-3 h-3 text-indigo-600" />
+                          <span>⚡ Bagi Rata ({activeMonths.length} Bln)</span>
+                        </button>
+                        <span className="text-[10px] text-slate-700 bg-white px-2 py-0.5 rounded border border-indigo-200 font-bold">
+                          Pagu: {formatRupiah(totalBudget)}
                         </span>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                    </div>
 
-              {Number(estimasiAnggaran) > 0 && tipeJadwal === 'multi_bulan' && (
-                <div className="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl space-y-1.5 mt-2">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-black text-indigo-950 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>Posisi Rencana Penggunaan Anggaran 2027 ({selectedMonths.length} Bulan Aktif)</span>
-                    </span>
-                    <strong className="text-indigo-900 font-extrabold">
-                      {selectedMonths.length > 0
-                        ? `${formatRupiah(Math.round(Number(estimasiAnggaran) / selectedMonths.length))} / bln aktif`
-                        : 'Rp 0'}
-                    </strong>
+                    {/* Grid Kartu Bulan Aktif */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[340px] overflow-y-auto pr-1">
+                      {activeMonths.map((mNo) => {
+                        const bObj = BULAN_LIST[mNo - 1];
+                        const defaultEven = activeMonths.length > 0 && totalBudget > 0
+                          ? Math.round(totalBudget / activeMonths.length)
+                          : 0;
+                        const curDana = alokasiDanaBulanan[mNo] !== undefined
+                          ? alokasiDanaBulanan[mNo]
+                          : defaultEven;
+                        const curNote = catatanBulanan[mNo] || '';
+
+                        return (
+                          <div
+                            key={mNo}
+                            className="bg-white p-2.5 rounded-xl border border-indigo-100 shadow-2xs space-y-1.5 hover:border-indigo-300 transition-colors"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-black text-slate-900 flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                <span>{bObj?.nama} 2027</span>
+                              </span>
+                              <span className="text-[10px] font-extrabold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">
+                                {formatRupiah(curDana)}
+                              </span>
+                            </div>
+
+                            <div>
+                              <label className="block text-[9.5px] font-bold text-slate-600 mb-0.5">
+                                Pemakaian Dana Bln Ini (Rp):
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">Rp</span>
+                                <input
+                                  type="text"
+                                  value={alokasiDanaBulanan[mNo] !== undefined ? alokasiDanaBulanan[mNo].toLocaleString('id-ID') : (defaultEven > 0 ? defaultEven.toLocaleString('id-ID') : '')}
+                                  onChange={(e) => handleAlokasiDanaBulananChange(mNo, e.target.value)}
+                                  placeholder="0"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-7 pr-2 py-1 text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-500 focus:bg-white"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-[9.5px] font-bold text-slate-600 mb-0.5">
+                                Catatan / Note Bulan Ini:
+                              </label>
+                              <input
+                                type="text"
+                                value={curNote}
+                                onChange={(e) => handleCatatanBulananChange(mNo, e.target.value)}
+                                placeholder="Contoh: Pembentukan panitia / pelaksanaan & pencairan dana..."
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-[10.5px] text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-1 text-center pt-1 text-[10px]">
-                    {BULAN_LIST.map((m) => {
-                      const isActive = selectedMonths.includes(m.no);
-                      return (
-                        <div
-                          key={m.no}
-                          className={`p-1 rounded-lg border ${
-                            isActive
-                              ? 'bg-white border-indigo-400 font-black text-indigo-950 shadow-2xs ring-1 ring-indigo-200'
-                              : 'bg-slate-100/60 border-slate-200 font-medium text-slate-400'
-                          }`}
-                        >
-                          <span className="font-bold block">{m.singkatan}</span>
-                          <span className="block truncate">
-                            {isActive
-                              ? formatRupiah(Math.round(Number(estimasiAnggaran) / (selectedMonths.length || 1)))
-                              : '-'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* Tombol Simpan */}
@@ -841,7 +1064,18 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
                     className="p-3 bg-slate-50 hover:bg-indigo-50/40 rounded-xl border border-slate-200 flex items-center justify-between gap-3 transition-colors"
                   >
                     <div className="space-y-0.5 min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+                        {/* Badge Kategori Program 2027 */}
+                        {(() => {
+                          const katInfo = getKategoriProgramInfo(p27.kategoriProgram);
+                          return (
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border flex items-center gap-1 ${katInfo.badge}`}>
+                              <span>{katInfo.iconEmoji}</span>
+                              <span>{katInfo.label}</span>
+                            </span>
+                          );
+                        })()}
+
                         {p27.programLanjutanDariId || p27.namaProgram2026Asal ? (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-blue-100 text-blue-900">
                             Lanjutan 2026
@@ -859,6 +1093,17 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
                         Bulan: {p27.bulanPelaksanaan?.map((b) => BULAN_LIST[b - 1]?.singkatan).join(', ')} ·{' '}
                         <strong className="text-slate-800">{formatRupiah(p27.estimasiAnggaran)}</strong>
                       </div>
+
+                      {/* Catatan Per Bulan 2027 jika ada */}
+                      {p27.catatanBulanan && Object.keys(p27.catatanBulanan).length > 0 && (
+                        <div className="mt-1 p-1.5 bg-indigo-50/60 rounded-md border border-indigo-100 text-[9.5px] text-indigo-950">
+                          <span className="font-bold text-indigo-900">Catatan Khusus: </span>
+                          {Object.entries(p27.catatanBulanan)
+                            .filter(([_, n]) => Boolean(n))
+                            .map(([mNum, note]) => `${BULAN_LIST[Number(mNum) - 1]?.singkatan}: ${note}`)
+                            .join(' · ')}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">

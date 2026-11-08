@@ -76,6 +76,9 @@ export interface ProgramKerja {
   statusKelanjutan2027?: 'dilanjutkan' | 'tidak_dilanjutkan' | 'baru';
   tindakLanjutKendala?: string; // Solusi atas kendala tahun 2026 untuk perancangan tahun 2027
   rekomendasiDPPH?: string; // Arahan/catatan evaluasi dari DPPH
+  catatanAdmin?: string; // Catatan arahan/penjadwalan ulang dari Pastor Paroki / Admin
+  diubahOleh?: string; // Aktor yang melakukan perubahan terakhir (Pastor Paroki / Admin / Seksi)
+  tanggalPerubahan?: string; // Waktu perubahan terakhir disimpan
   catatan?: string;
   createdAt: string;
   updatedAt: string;

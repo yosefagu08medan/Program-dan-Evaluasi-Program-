@@ -26,6 +26,8 @@ export interface PenerimaanMingguan {
   alokasiSeksi?: string; // Seksi penerima alokasi atau 'Umum Paroki'
   tipeSumber?: TipeSumberPenerimaan; // 'paroki' | 'seksi_tetap' (PSE/KKI) | 'seksi_tentatif'
   isTentatif?: boolean; // True jika merupakan penerimaan insidental/tentatif seksi
+  isHariKhusus?: boolean; // True jika merupakan kolekte/misa di luar hari Minggu rutin (Kamis Putih, Jumat Agung, Natal, dll.)
+  namaHariKhusus?: string; // Nama hari perayaan khusus (misal: "Kamis Putih", "Jumat Agung", "Malam Paskah", dll.)
   keterangan?: string; // Catatan teknis misa / kwitansi / jumlah amplop
   pencatat?: string; // Nama petugas / bendahara yang menginput (Default: Bendahara Paroki)
   createdAt: string;
@@ -166,4 +168,85 @@ export function getKategoriMeta(kategori: KategoriPenerimaan): KategoriPenerimaa
       accentColor: 'text-slate-600',
     }
   );
+}
+
+// =========================================================================
+// STANDAR PILIHAN NAMA PENERIMAAN KHUSUS SEKSI PSE:
+// 1. Dana Aksi Puasa Pembangunan
+// 2. Amplop Natal
+// 3. Dana Solidaritas Umat
+// + Pilihan kustom yang bisa diketik sendiri, disimpan, dan menjadi pilihan berikutnya
+// =========================================================================
+export const DEFAULT_PSE_PENERIMAAN_OPTIONS = [
+  'Dana Aksi Puasa Pembangunan',
+  'Amplop Natal',
+  'Dana Solidaritas Umat',
+] as const;
+
+export const PSE_CUSTOM_OPTIONS_STORAGE_KEY = 'proker_pse_custom_penerimaan_options';
+
+export function getPseCustomPenerimaanOptions(): string[] {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = localStorage.getItem(PSE_CUSTOM_OPTIONS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(
+            (opt): opt is string =>
+              typeof opt === 'string' &&
+              opt.trim().length > 0 &&
+              !DEFAULT_PSE_PENERIMAAN_OPTIONS.some(
+                (d) => d.toLowerCase() === opt.trim().toLowerCase()
+              )
+          );
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Error reading PSE custom penerimaan options:', e);
+  }
+  return [];
+}
+
+export function getAllPsePenerimaanOptions(): string[] {
+  const custom = getPseCustomPenerimaanOptions();
+  return [...DEFAULT_PSE_PENERIMAAN_OPTIONS, ...custom];
+}
+
+export function savePseCustomPenerimaanOption(newOption: string): string[] {
+  const trimmed = newOption.trim();
+  if (!trimmed) return getAllPsePenerimaanOptions();
+  const isDefault = DEFAULT_PSE_PENERIMAAN_OPTIONS.some(
+    (d) => d.toLowerCase() === trimmed.toLowerCase()
+  );
+  if (isDefault) return getAllPsePenerimaanOptions();
+
+  const currentCustom = getPseCustomPenerimaanOptions();
+  const exists = currentCustom.some((c) => c.toLowerCase() === trimmed.toLowerCase());
+  if (!exists) {
+    const updated = [...currentCustom, trimmed];
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem(PSE_CUSTOM_OPTIONS_STORAGE_KEY, JSON.stringify(updated));
+      }
+    } catch (e) {
+      console.warn('Error saving PSE custom penerimaan option:', e);
+    }
+    return [...DEFAULT_PSE_PENERIMAAN_OPTIONS, ...updated];
+  }
+  return [...DEFAULT_PSE_PENERIMAAN_OPTIONS, ...currentCustom];
+}
+
+export function removePseCustomPenerimaanOption(optionToRemove: string): string[] {
+  const currentCustom = getPseCustomPenerimaanOptions();
+  const updated = currentCustom.filter((c) => c !== optionToRemove);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem(PSE_CUSTOM_OPTIONS_STORAGE_KEY, JSON.stringify(updated));
+    }
+  } catch (e) {
+    console.warn('Error deleting PSE custom penerimaan option:', e);
+  }
+  return [...DEFAULT_PSE_PENERIMAAN_OPTIONS, ...updated];
 }

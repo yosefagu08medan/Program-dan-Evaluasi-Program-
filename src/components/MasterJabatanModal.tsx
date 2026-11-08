@@ -69,8 +69,6 @@ export const MasterJabatanModal: React.FC<MasterJabatanModalProps> = ({
     }
   }, [isOpen, initialCategory]);
 
-  if (!isOpen) return null;
-
   // Filter daftar jabatan
   const filteredList = useMemo(() => {
     return jabatanList.filter((j) => {
@@ -181,6 +179,8 @@ export const MasterJabatanModal: React.FC<MasterJabatanModalProps> = ({
         return null;
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">

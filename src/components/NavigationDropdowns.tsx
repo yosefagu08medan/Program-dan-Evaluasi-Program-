@@ -14,7 +14,10 @@ import {
   ChevronDown,
   Users,
   Check,
+  Heart,
 } from 'lucide-react';
+import { AuthSession } from '../types/auth';
+import { isDivisionMatch } from '../utils/formatters';
 
 export type MainCategory = 'dashboard' | 'program' | 'keuangan' | 'pengurus';
 
@@ -29,18 +32,23 @@ export type SubMenuKey =
   | 'keuangan_realisasi_penerimaan'
   | 'keuangan_penggunaan_dana'
   | 'keuangan_tabel_kas'
+  | 'keuangan_pse'
   | 'pengurus';
 
 interface NavigationDropdownsProps {
   activeTab: SubMenuKey;
   onSelectTab: (tab: SubMenuKey) => void;
   isBendahara?: boolean;
+  isPastorOrAdmin?: boolean;
+  authSession?: AuthSession | null;
 }
 
 export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
   activeTab,
   onSelectTab,
   isBendahara = false,
+  isPastorOrAdmin = false,
+  authSession = null,
 }) => {
   const [openDropdown, setOpenDropdown] = useState<MainCategory | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -65,6 +73,13 @@ export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
     setOpenDropdown(null);
   };
 
+  const isPseUser =
+    authSession?.unitNama === 'Seksi PSE' ||
+    authSession?.unitId === 'div-pse' ||
+    (authSession?.unitNama ? isDivisionMatch(authSession.unitNama, 'Seksi PSE') : false);
+
+  const canAccessKeuangan = isPastorOrAdmin || isBendahara || isPseUser;
+
   // Determine which parent category is currently active
   const isDashboardActive =
     activeTab === 'dashboard_keseluruhan' || activeTab === 'dashboard_keuangan';
@@ -79,7 +94,8 @@ export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
     activeTab === 'keuangan_rencana_penerimaan' ||
     activeTab === 'keuangan_realisasi_penerimaan' ||
     activeTab === 'keuangan_penggunaan_dana' ||
-    activeTab === 'keuangan_tabel_kas';
+    activeTab === 'keuangan_tabel_kas' ||
+    activeTab === 'keuangan_pse';
 
   const isPengurusActive = activeTab === 'pengurus';
 
@@ -134,26 +150,28 @@ export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
               {activeTab === 'dashboard_keseluruhan' && <Check className="w-4 h-4 text-emerald-600" />}
             </button>
 
-            <button
-              type="button"
-              onClick={() => handleSelect('dashboard_keuangan')}
-              className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
-                activeTab === 'dashboard_keuangan'
-                  ? 'bg-emerald-50 text-emerald-950 font-black'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-teal-100 text-teal-800 flex items-center justify-center">
-                  <TrendingUp className="w-3.5 h-3.5" />
+            {canAccessKeuangan && (
+              <button
+                type="button"
+                onClick={() => handleSelect('dashboard_keuangan')}
+                className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
+                  activeTab === 'dashboard_keuangan'
+                    ? 'bg-emerald-50 text-emerald-950 font-black'
+                    : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-teal-100 text-teal-800 flex items-center justify-center">
+                    <TrendingUp className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="text-xs">Dashboard Penggunaan Dana &amp; Penerimaan</div>
+                    <div className="text-[10px] text-slate-400 font-medium">Analitik kas, penerimaan &amp; sisa saldo</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-xs">Dashboard Penggunaan Dana &amp; Penerimaan</div>
-                  <div className="text-[10px] text-slate-400 font-medium">Analitik kas, penerimaan &amp; sisa saldo</div>
-                </div>
-              </div>
-              {activeTab === 'dashboard_keuangan' && <Check className="w-4 h-4 text-emerald-600" />}
-            </button>
+                {activeTab === 'dashboard_keuangan' && <Check className="w-4 h-4 text-emerald-600" />}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -296,111 +314,258 @@ export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
         </button>
 
         {openDropdown === 'keuangan' && (
-          <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-1.5 w-76 bg-white rounded-2xl shadow-xl border border-slate-200 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+          <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-1.5 w-80 bg-white rounded-2xl shadow-xl border border-slate-200 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
             <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
               Menu Keuangan Paroki
             </div>
 
-            {/* Sub 1: Input Rencana Penerimaan */}
-            <button
-              type="button"
-              onClick={() => handleSelect('keuangan_rencana_penerimaan')}
-              className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
-                activeTab === 'keuangan_rencana_penerimaan'
-                  ? 'bg-teal-50 text-teal-950 font-black'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-blue-100 text-blue-800 flex items-center justify-center">
-                  <ArrowDownCircle className="w-3.5 h-3.5 text-blue-600" />
+            {/* Menu Khusus Seksi PSE jika sedang login sebagai PSE */}
+            {isPseUser ? (
+              <div className="space-y-1 pb-1 mb-1 border-b border-amber-200">
+                <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-amber-900 bg-amber-100 rounded-lg flex items-center gap-1.5">
+                  <Heart className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
+                  <span>Hak Akses Khusus: Seksi PSE</span>
                 </div>
-                <div>
-                  <div className="text-xs">Input Rencana Penerimaan</div>
-                  <div className="text-[10px] text-slate-400 font-medium">
-                    Target Kolekte I (50:50), Kolekte II &amp; Khusus
-                  </div>
-                </div>
-              </div>
-              {activeTab === 'keuangan_rencana_penerimaan' && <Check className="w-4 h-4 text-teal-600" />}
-            </button>
 
-            {/* Sub 2: Input Realisasi Penerimaan */}
-            <button
-              type="button"
-              onClick={() => handleSelect('keuangan_realisasi_penerimaan')}
-              className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
-                activeTab === 'keuangan_realisasi_penerimaan'
-                  ? 'bg-teal-50 text-teal-950 font-black'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
-                  <Coins className="w-3.5 h-3.5 text-emerald-600" />
-                </div>
-                <div>
-                  <div className="text-xs">Input Realisasi Penerimaan</div>
-                  <div className="text-[10px] text-slate-400 font-medium">
-                    Catat kas aktual riil masuk mingguan
+                {/* Sub PSE 1: Perencanaan Penerimaan Dana Umat */}
+                <button
+                  type="button"
+                  onClick={() => handleSelect('keuangan_rencana_penerimaan')}
+                  className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
+                    activeTab === 'keuangan_rencana_penerimaan'
+                      ? 'bg-amber-50 text-amber-950 font-black'
+                      : 'text-slate-700 hover:bg-amber-50/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center">
+                      <ArrowDownCircle className="w-3.5 h-3.5 text-amber-600" />
+                    </div>
+                    <div>
+                      <div className="text-xs">Perencanaan Penerimaan Dana Umat</div>
+                      <div className="text-[10px] text-slate-400 font-medium">
+                        Target APP, Aksi Natal, Kotak Kasih &amp; Donatur
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              {activeTab === 'keuangan_realisasi_penerimaan' && <Check className="w-4 h-4 text-teal-600" />}
-            </button>
+                  {activeTab === 'keuangan_rencana_penerimaan' && <Check className="w-4 h-4 text-amber-600" />}
+                </button>
 
-            {/* Sub 3: Input Penggunaan Dana */}
-            <button
-              type="button"
-              onClick={() => handleSelect('keuangan_penggunaan_dana')}
-              className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
-                activeTab === 'keuangan_penggunaan_dana'
-                  ? 'bg-teal-50 text-teal-950 font-black'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center">
-                  <ArrowUpCircle className="w-3.5 h-3.5 text-amber-600" />
-                </div>
-                <div>
-                  <div className="text-xs">Input Penggunaan Dana</div>
-                  <div className="text-[10px] text-slate-400 font-medium">
-                    Realisasi pengeluaran anggaran program seksi
+                {/* Sub PSE 2: Realisasi Penerimaan Dana Umat */}
+                <button
+                  type="button"
+                  onClick={() => handleSelect('keuangan_realisasi_penerimaan')}
+                  className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
+                    activeTab === 'keuangan_realisasi_penerimaan'
+                      ? 'bg-amber-50 text-amber-950 font-black'
+                      : 'text-slate-700 hover:bg-amber-50/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                      <Coins className="w-3.5 h-3.5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <div className="text-xs">Realisasi Penerimaan Dana Umat</div>
+                      <div className="text-[10px] text-slate-400 font-medium">
+                        Catat masukan aktual riil dana kasih dari umat
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              {activeTab === 'keuangan_penggunaan_dana' && <Check className="w-4 h-4 text-teal-600" />}
-            </button>
+                  {activeTab === 'keuangan_realisasi_penerimaan' && <Check className="w-4 h-4 text-emerald-600" />}
+                </button>
 
-            {/* Sub 4: Tabel Rencana Penerimaan dan Penggunaan */}
-            <button
-              type="button"
-              onClick={() => handleSelect('keuangan_tabel_kas')}
-              className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
-                activeTab === 'keuangan_tabel_kas'
-                  ? 'bg-teal-50 text-teal-950 font-black'
-                  : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center">
-                  <TableProperties className="w-3.5 h-3.5 text-indigo-600" />
-                </div>
-                <div>
-                  <div className="text-xs">Tabel Rencana Penerimaan &amp; Penggunaan</div>
-                  <div className="text-[10px] text-slate-400 font-medium">
-                    Proyeksi arus kas bulanan &amp; daya dukung
+                {/* Sub PSE 3: Realisasi & Penggunaan Dana Bantuan */}
+                <button
+                  type="button"
+                  onClick={() => handleSelect('keuangan_pse')}
+                  className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
+                    activeTab === 'keuangan_pse'
+                      ? 'bg-rose-50 text-rose-950 font-black'
+                      : 'text-slate-700 hover:bg-rose-50/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-rose-100 text-rose-800 flex items-center justify-center">
+                      <ArrowUpCircle className="w-3.5 h-3.5 text-rose-600" />
+                    </div>
+                    <div>
+                      <div className="text-xs">Realisasi &amp; Penggunaan Dana Umat</div>
+                      <div className="text-[10px] text-slate-400 font-medium">
+                        Penyaluran santunan, sembako &amp; beasiswa PSE
+                      </div>
+                    </div>
                   </div>
-                </div>
+                  {activeTab === 'keuangan_pse' && <Check className="w-4 h-4 text-rose-600" />}
+                </button>
+
+                {/* Sub PSE 4: Tabel Arus Kas & Program PSE */}
+                <button
+                  type="button"
+                  onClick={() => handleSelect('keuangan_tabel_kas')}
+                  className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
+                    activeTab === 'keuangan_tabel_kas'
+                      ? 'bg-indigo-50 text-indigo-950 font-black'
+                      : 'text-slate-700 hover:bg-indigo-50/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center">
+                      <TableProperties className="w-3.5 h-3.5 text-indigo-600" />
+                    </div>
+                    <div>
+                      <div className="text-xs">Tabel Arus Kas &amp; Program PSE</div>
+                      <div className="text-[10px] text-slate-400 font-medium">
+                        Grafik 12 bulan &amp; ketercukupan dana kasih
+                      </div>
+                    </div>
+                  </div>
+                  {activeTab === 'keuangan_tabel_kas' && <Check className="w-4 h-4 text-indigo-600" />}
+                </button>
               </div>
-              {activeTab === 'keuangan_tabel_kas' && <Check className="w-4 h-4 text-teal-600" />}
-            </button>
+            ) : (
+              <>
+                {/* Notice jika bukan Pastor Paroki / Admin / Bendahara */}
+                {!canAccessKeuangan && (
+                  <div className="px-2.5 py-1.5 text-[10px] text-amber-800 bg-amber-50 rounded-xl border border-amber-200 mb-1 font-medium leading-relaxed">
+                    🔒 Menu Rencana &amp; Realisasi Penerimaan Kas hanya dapat diakses oleh <strong>Pastor Paroki / Admin</strong>, <strong>Bendahara Paroki</strong>, dan <strong>Seksi PSE</strong>.
+                  </div>
+                )}
+
+                {/* Sub 1: Input Rencana Penerimaan (Pastor Paroki / Admin & Bendahara) */}
+                {canAccessKeuangan && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelect('keuangan_rencana_penerimaan')}
+                    className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
+                      activeTab === 'keuangan_rencana_penerimaan'
+                        ? 'bg-teal-50 text-teal-950 font-black'
+                        : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-blue-100 text-blue-800 flex items-center justify-center">
+                        <ArrowDownCircle className="w-3.5 h-3.5 text-blue-600" />
+                      </div>
+                      <div>
+                        <div className="text-xs">Input Rencana Penerimaan</div>
+                        <div className="text-[10px] text-slate-400 font-medium">
+                          Target Kolekte I (50:50), Kolekte II &amp; Khusus
+                        </div>
+                      </div>
+                    </div>
+                    {activeTab === 'keuangan_rencana_penerimaan' && <Check className="w-4 h-4 text-teal-600" />}
+                  </button>
+                )}
+
+                {/* Sub 2: Input Realisasi Penerimaan (Pastor Paroki / Admin & Bendahara) */}
+                {canAccessKeuangan && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelect('keuangan_realisasi_penerimaan')}
+                    className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
+                      activeTab === 'keuangan_realisasi_penerimaan'
+                        ? 'bg-teal-50 text-teal-950 font-black'
+                        : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                        <Coins className="w-3.5 h-3.5 text-emerald-600" />
+                      </div>
+                      <div>
+                        <div className="text-xs">Input Realisasi Penerimaan</div>
+                        <div className="text-[10px] text-slate-400 font-medium">
+                          Catat kas aktual riil masuk mingguan
+                        </div>
+                      </div>
+                    </div>
+                    {activeTab === 'keuangan_realisasi_penerimaan' && <Check className="w-4 h-4 text-teal-600" />}
+                  </button>
+                )}
+
+                {/* Sub 3: Input Penggunaan Dana (Tersedia untuk Seksi, Bendahara & Admin) */}
+                <button
+                  type="button"
+                  onClick={() => handleSelect('keuangan_penggunaan_dana')}
+                  className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
+                    activeTab === 'keuangan_penggunaan_dana'
+                      ? 'bg-teal-50 text-teal-950 font-black'
+                      : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center">
+                      <ArrowUpCircle className="w-3.5 h-3.5 text-amber-600" />
+                    </div>
+                    <div>
+                      <div className="text-xs">Input Penggunaan Dana</div>
+                      <div className="text-[10px] text-slate-400 font-medium">
+                        Realisasi pengeluaran anggaran program seksi
+                      </div>
+                    </div>
+                  </div>
+                  {activeTab === 'keuangan_penggunaan_dana' && <Check className="w-4 h-4 text-teal-600" />}
+                </button>
+
+                {/* Sub 4: Tabel Rencana Penerimaan dan Penggunaan (Pastor Paroki / Admin & Bendahara) */}
+                {canAccessKeuangan && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelect('keuangan_tabel_kas')}
+                    className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
+                      activeTab === 'keuangan_tabel_kas'
+                        ? 'bg-teal-50 text-teal-950 font-black'
+                        : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center">
+                        <TableProperties className="w-3.5 h-3.5 text-indigo-600" />
+                      </div>
+                      <div>
+                        <div className="text-xs">Tabel Rencana Penerimaan &amp; Penggunaan</div>
+                        <div className="text-[10px] text-slate-400 font-medium">
+                          Proyeksi arus kas bulanan &amp; daya dukung
+                        </div>
+                      </div>
+                    </div>
+                    {activeTab === 'keuangan_tabel_kas' && <Check className="w-4 h-4 text-teal-600" />}
+                  </button>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>
 
-      {/* 4. TOMBOL PENGURUS PAROKI */}
+      {/* 4. TOMBOL KHUSUS PSE (DANA UMAT & PROGRAM BANTUAN) */}
+      {(isPseUser || isPastorOrAdmin) && (
+        <button
+          type="button"
+          onClick={() => handleSelect('keuangan_pse')}
+          className={`py-1.5 px-3 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+            activeTab === 'keuangan_pse'
+              ? 'bg-amber-600 text-white shadow-xs ring-1 ring-amber-400'
+              : isPseUser
+              ? 'bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 shadow-2xs'
+              : 'bg-white hover:bg-slate-50 text-slate-800 border border-slate-200/80 shadow-2xs'
+          }`}
+          title="Menu Khusus Seksi PSE: Perencanaan Penerimaan Dana Umat, Realisasi, dan Penggunaan Bantuan"
+        >
+          <Heart
+            className={`w-3.5 h-3.5 ${
+              activeTab === 'keuangan_pse' ? 'text-amber-200 fill-amber-200' : 'text-amber-600 fill-amber-500'
+            }`}
+          />
+          <span>🤝 Khusus PSE</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-[9.5px] font-black text-amber-900 hidden sm:inline">
+            Dana Umat
+          </span>
+        </button>
+      )}
+
+      {/* 5. TOMBOL PENGURUS PAROKI */}
       <button
         type="button"
         onClick={() => handleSelect('pengurus')}

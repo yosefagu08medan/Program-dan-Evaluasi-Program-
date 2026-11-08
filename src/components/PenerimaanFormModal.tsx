@@ -17,6 +17,7 @@ import {
   Split,
   Building,
   Coins,
+  Plus,
 } from 'lucide-react';
 import {
   PenerimaanMingguan,
@@ -25,10 +26,21 @@ import {
   TipeSumberPenerimaan,
   isSeksiTetap,
   calculateKolekte1Split,
+  DEFAULT_PSE_PENERIMAAN_OPTIONS,
+  getAllPsePenerimaanOptions,
+  savePseCustomPenerimaanOption,
+  removePseCustomPenerimaanOption,
 } from '../types/penerimaan';
 import { ProgramKerja } from '../types/proker';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
-import { BULAN_LIST, formatRupiah, parseRupiahInput } from '../utils/formatters';
+import {
+  BULAN_LIST,
+  formatRupiah,
+  parseRupiahInput,
+  formatIndonesianDate,
+  getSundaysInMonth,
+  HARI_KHUSUS_PRESETS,
+} from '../utils/formatters';
 import { AuthSession } from '../types/auth';
 
 interface PenerimaanFormModalProps {
@@ -118,6 +130,11 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
   const [seksiKeterangan, setSeksiKeterangan] = useState<string>('');
   const [seksiPencatat, setSeksiPencatat] = useState<string>('');
 
+  // State Khusus Pilihan PSE (Standar 3 Pilihan + Kustom Tersimpan)
+  const [pseOptions, setPseOptions] = useState<string[]>(() => getAllPsePenerimaanOptions());
+  const [isCustomPseMode, setIsCustomPseMode] = useState<boolean>(false);
+  const [customPseNama, setCustomPseNama] = useState<string>('');
+
   // Status & Validasi
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -159,14 +176,13 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
     setBulan(targetBulan);
     setMingguKe(targetMinggu);
 
-    // Tanggal estimasi
+    // Tanggal hari Minggu kalender riil
     if (initialData?.tanggal) {
       setTanggal(initialData.tanggal);
     } else {
-      const estDay = Math.min(28, (targetMinggu - 1) * 7 + 4);
-      const estMonthStr = String(targetBulan).padStart(2, '0');
-      const estDayStr = String(estDay).padStart(2, '0');
-      setTanggal(`${targetTahun}-${estMonthStr}-${estDayStr}`);
+      const currentSundays = getSundaysInMonth(targetTahun, targetBulan);
+      const sun = currentSundays[targetMinggu - 1] || currentSundays[0];
+      setTanggal(sun?.tanggal || `${targetTahun}-${String(targetBulan).padStart(2, '0')}-01`);
     }
 
     // Tentukan mode awal
@@ -216,6 +232,9 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
     }
 
     // Inisialisasi Mode Seksi
+    const currentAllPse = getAllPsePenerimaanOptions();
+    setPseOptions(currentAllPse);
+
     if (initialData && !['kolekte_1', 'kolekte_2', 'kolekte_khusus'].includes(initialData.kategori)) {
       setSeksiKategori(initialData.kategori);
       setSeksiNama(initialData.namaPenerimaan || '');
@@ -226,13 +245,25 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
       setSeksiProkerId(initialData.alokasiProkerId || '');
       setSeksiKeterangan(initialData.keterangan || '');
       setSeksiPencatat(initialData.pencatat || `Bendahara ${initialData.alokasiSeksi}`);
+
+      if (initialData.alokasiSeksi === 'Seksi PSE' || isSeksiPSE) {
+        if (initialData.namaPenerimaan && !currentAllPse.includes(initialData.namaPenerimaan)) {
+          setIsCustomPseMode(true);
+          setCustomPseNama(initialData.namaPenerimaan);
+        } else {
+          setIsCustomPseMode(false);
+          setCustomPseNama('');
+        }
+      }
     } else {
       if (isSeksiPSE) {
         setSeksiAlokasi('Seksi PSE');
         setSeksiTipeSumber('seksi_tetap');
         setSeksiKategori(defaultKategori || 'persembahan_umat');
-        setSeksiNama(defaultNamaPenerimaan || 'Penerimaan Kas & Derma Kasih Seksi PSE');
+        setSeksiNama(defaultNamaPenerimaan || 'Dana Solidaritas Umat');
         setSeksiPencatat('Bendahara Seksi PSE');
+        setIsCustomPseMode(false);
+        setCustomPseNama('');
       } else {
         const target =
           authSession?.unitNama && authSession.unitNama !== 'all' && authSession.unitNama !== 'Umum Paroki'
@@ -245,6 +276,8 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
         setSeksiKategori(defaultKategori || 'usaha_dana_seksi');
         setSeksiNama(defaultNamaPenerimaan || `Usaha Dana / Donatur ${target}`);
         setSeksiPencatat(`Bendahara ${target}`);
+        setIsCustomPseMode(false);
+        setCustomPseNama('');
       }
       setSeksiRencanaStr(defaultRancangan && !['kolekte_1', 'kolekte_2', 'kolekte_khusus'].includes(defaultKategori || '') ? defaultRancangan.toLocaleString('id-ID') : '3.000.000');
       setSeksiRealisasiStr(defaultRealisasi && !['kolekte_1', 'kolekte_2', 'kolekte_khusus'].includes(defaultKategori || '') ? defaultRealisasi.toLocaleString('id-ID') : '');
@@ -486,6 +519,8 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
           alokasiSeksi: 'Umum Paroki',
           tipeSumber: 'paroki',
           isTentatif: false,
+          isHariKhusus: true,
+          namaHariKhusus: khususNama.trim(),
           keterangan: khususKeterangan.trim() || undefined,
           pencatat: 'Bendahara Paroki',
           createdAt: initialData?.createdAt || new Date().toISOString(),
@@ -496,10 +531,25 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
         onClose();
       } else {
         // Mode Seksi (Single pos penerimaan seksi)
-        if (!seksiNama.trim()) {
-          setErrorMsg('Nama atau uraian penerimaan seksi wajib diisi.');
+        const isTargetPSE = isSeksiPSE || seksiAlokasi === 'Seksi PSE';
+        const finalNama = isTargetPSE && isCustomPseMode
+          ? customPseNama.trim()
+          : seksiNama.trim();
+
+        if (!finalNama) {
+          setErrorMsg(
+            isTargetPSE
+              ? 'Pilih salah satu atau ketik nama penerimaan PSE.'
+              : 'Nama atau uraian penerimaan seksi wajib diisi.'
+          );
           setIsSubmitting(false);
           return;
+        }
+
+        // Jika Seksi PSE, simpan pilihan jika baru agar menjadi pilihan pada program berikutnya
+        if (isTargetPSE) {
+          savePseCustomPenerimaanOption(finalNama);
+          setPseOptions(getAllPsePenerimaanOptions());
         }
 
         let selectedProgName: string | undefined = undefined;
@@ -521,7 +571,7 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
           mingguKe,
           tanggal: tanggal || `${tahun}-${String(bulan).padStart(2, '0')}-01`,
           kategori: seksiKategori,
-          namaPenerimaan: seksiNama.trim(),
+          namaPenerimaan: finalNama,
           rancangan: seksiRencanaNum,
           realisasi: seksiRealisasiNum,
           alokasiSeksi: seksiAlokasi || 'Seksi PSE',
@@ -666,7 +716,15 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
               </label>
               <select
                 value={bulan}
-                onChange={(e) => setBulan(Number(e.target.value))}
+                onChange={(e) => {
+                  const newB = Number(e.target.value);
+                  setBulan(newB);
+                  if (formMode !== 'kolekte_khusus') {
+                    const currentSundays = getSundaysInMonth(tahun, newB);
+                    const sun = currentSundays[mingguKe - 1] || currentSundays[0];
+                    if (sun?.tanggal) setTanggal(sun.tanggal);
+                  }
+                }}
                 className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
               >
                 {BULAN_LIST.map((b) => (
@@ -683,14 +741,22 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
               </label>
               <select
                 value={mingguKe}
-                onChange={(e) => setMingguKe(Number(e.target.value) as 1 | 2 | 3 | 4 | 5)}
+                onChange={(e) => {
+                  const newW = Number(e.target.value) as 1 | 2 | 3 | 4 | 5;
+                  setMingguKe(newW);
+                  if (formMode !== 'kolekte_khusus') {
+                    const currentSundays = getSundaysInMonth(tahun, bulan);
+                    const sun = currentSundays[newW - 1] || currentSundays[0];
+                    if (sun?.tanggal) setTanggal(sun.tanggal);
+                  }
+                }}
                 className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
               >
-                <option value={1}>Minggu I (Hari 1-7)</option>
-                <option value={2}>Minggu II (Hari 8-14)</option>
-                <option value={3}>Minggu III (Hari 15-21)</option>
-                <option value={4}>Minggu IV (Hari 22-28)</option>
-                <option value={5}>Minggu V (Hari 29-31)</option>
+                {getSundaysInMonth(tahun, bulan).map((sun) => (
+                  <option key={sun.mingguKe} value={sun.mingguKe}>
+                    {sun.labelShort} (Hari Minggu)
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -705,6 +771,9 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
                 className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-emerald-600"
                 required
               />
+              <div className="text-[10px] font-bold text-emerald-800 mt-0.5 truncate">
+                {tanggal ? formatIndonesianDate(tanggal, true) : 'Pilih tanggal'}
+              </div>
             </div>
           </div>
 
@@ -1112,11 +1181,38 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
                 </span>
               </div>
 
-              {/* Uraian Kolekte Khusus */}
-              <div className="space-y-1">
-                <label className="block text-[11px] font-black uppercase tracking-wider text-purple-950">
-                  Uraian / Nama Kolekte Khusus *
-                </label>
+              {/* Uraian Kolekte Khusus & Pilihan Cepat Hari Raya */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between flex-wrap gap-1">
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-purple-950">
+                    Uraian / Nama Kolekte Khusus *
+                  </label>
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setKhususNama(e.target.value);
+                        const lower = e.target.value.toLowerCase();
+                        if (lower.includes('24 des')) setTanggal(`${tahun}-12-24`);
+                        else if (lower.includes('25 des') || lower.includes('natal')) setTanggal(`${tahun}-12-25`);
+                        else if (lower.includes('31 des') || lower.includes('tutup tahun')) setTanggal(`${tahun}-12-31`);
+                        else if (lower.includes('1 jan') || lower.includes('bunda allah')) setTanggal(`${tahun}-01-01`);
+                        else if (lower.includes('8 des') || lower.includes('pelindung')) setTanggal(`${tahun}-12-08`);
+                        e.target.value = '';
+                      }
+                    }}
+                    className="text-[10px] font-bold text-purple-900 bg-white border border-purple-300 rounded-lg px-2 py-0.5 focus:outline-none cursor-pointer"
+                  >
+                    <option value="" disabled>
+                      ⚡ Pilih Cepat Hari Raya...
+                    </option>
+                    {HARI_KHUSUS_PRESETS.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <input
                   type="text"
                   value={khususNama}
@@ -1262,24 +1358,132 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
                 </div>
               </div>
 
-              {/* Nama Penerimaan */}
-              <div>
-                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
-                  Nama / Uraian Penerimaan Seksi *
-                </label>
-                <input
-                  type="text"
-                  value={seksiNama}
-                  onChange={(e) => setSeksiNama(e.target.value)}
-                  placeholder={
-                    isSeksiPSE
-                      ? 'Contoh: Penerimaan Kotak Derma Kasih & APP Seksi PSE'
-                      : 'Contoh: Usaha Dana Penjualan Makanan & Donatur Khusus Seksi'
-                  }
-                  className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-600"
-                  required
-                />
-              </div>
+              {/* Nama Penerimaan: Khusus PSE vs Seksi Lain */}
+              {(isSeksiPSE || seksiAlokasi === 'Seksi PSE') ? (
+                <div className="space-y-2.5 p-3.5 rounded-2xl bg-amber-50/80 border-2 border-amber-300">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-amber-950 flex items-center gap-1.5">
+                      <Heart className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
+                      <span>Pilihan Nama Penerimaan Seksi PSE *</span>
+                    </label>
+                    <span className="text-[10px] text-amber-900 font-extrabold bg-amber-200/80 px-2 py-0.5 rounded-full self-start sm:self-auto">
+                      Standar: 3 Pos Utama + Pilihan Kustom
+                    </span>
+                  </div>
+
+                  {/* Pills Pilihan Standar & Kustom */}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {pseOptions.map((opt) => {
+                      const isSelected = !isCustomPseMode && seksiNama === opt;
+                      const isDefault = (DEFAULT_PSE_PENERIMAAN_OPTIONS as readonly string[]).includes(opt);
+
+                      return (
+                        <div
+                          key={opt}
+                          className={`group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border ${
+                            isSelected
+                              ? 'bg-amber-600 text-white border-amber-700 shadow-xs ring-2 ring-amber-400/50'
+                              : 'bg-white text-slate-800 border-amber-200 hover:border-amber-400 hover:bg-amber-100/50 shadow-2xs'
+                          }`}
+                          onClick={() => {
+                            setIsCustomPseMode(false);
+                            setSeksiNama(opt);
+                          }}
+                        >
+                          <span>{opt}</span>
+                          {!isDefault && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const updated = removePseCustomPenerimaanOption(opt);
+                                setPseOptions(updated);
+                                if (seksiNama === opt) {
+                                  setSeksiNama('Dana Solidaritas Umat');
+                                }
+                              }}
+                              className="ml-1 w-4 h-4 rounded-full bg-rose-100 hover:bg-rose-200 text-rose-800 flex items-center justify-center text-[10px] font-black opacity-80 group-hover:opacity-100 transition-opacity"
+                              title="Hapus pilihan tambahan ini"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Tombol Pilihan Tambahan Baru */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCustomPseMode(true);
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-dashed ${
+                        isCustomPseMode
+                          ? 'bg-amber-700 text-white border-amber-800 shadow-xs ring-2 ring-amber-500'
+                          : 'bg-amber-100/80 hover:bg-amber-200 text-amber-950 border-amber-400'
+                      }`}
+                    >
+                      <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <span>+ Tambah Pilihan Baru / Ketik Sendiri</span>
+                    </button>
+                  </div>
+
+                  {/* Input Teks jika memilih ketik sendiri */}
+                  {isCustomPseMode && (
+                    <div className="pt-2.5 border-t border-amber-200 space-y-1.5 animate-in fade-in duration-150">
+                      <label className="block text-[10.5px] font-black uppercase tracking-wider text-amber-900">
+                        Ketik Nama Pilihan Baru (Akan Disimpan untuk Program Berikutnya):
+                      </label>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={customPseNama}
+                          onChange={(e) => {
+                            setCustomPseNama(e.target.value);
+                            setSeksiNama(e.target.value);
+                          }}
+                          placeholder="Contoh: Donatur Khusus Beasiswa Kasih / Bazar Amal PSE"
+                          className="flex-1 px-3.5 py-2 bg-white border border-amber-400 rounded-xl text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (customPseNama.trim()) {
+                              const updated = savePseCustomPenerimaanOption(customPseNama.trim());
+                              setPseOptions(updated);
+                              setSeksiNama(customPseNama.trim());
+                              setIsCustomPseMode(false);
+                            }
+                          }}
+                          className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-xs transition-colors cursor-pointer shrink-0"
+                        >
+                          Simpan Pilihan
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-amber-900/80 font-medium">
+                        💡 Pilihan yang Anda ketik akan otomatis disimpan di sistem dan langsung menjadi opsi tombol pilihan pada program dan pencatatan penerimaan berikutnya.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Non-PSE Seksi Nama Input */
+                <div>
+                  <label className="block text-[11px] font-black uppercase tracking-wider text-slate-700 mb-1">
+                    Nama / Uraian Penerimaan Seksi *
+                  </label>
+                  <input
+                    type="text"
+                    value={seksiNama}
+                    onChange={(e) => setSeksiNama(e.target.value)}
+                    placeholder="Contoh: Usaha Dana Penjualan Makanan & Donatur Khusus Seksi"
+                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-600"
+                    required
+                  />
+                </div>
+              )}
 
               {/* 2 Kotak: Rencana vs Realisasi Seksi */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

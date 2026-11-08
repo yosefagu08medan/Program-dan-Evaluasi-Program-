@@ -38,6 +38,7 @@ import {
   BarChart3,
   Wallet,
   Coins,
+  ArrowLeft,
 } from 'lucide-react';
 import { ProgramKerja, ScheduleType, ProgramStatus, KategoriProgram } from './types/proker';
 import { INITIAL_PROGRAM_KERJA } from './data/initialData';
@@ -164,8 +165,14 @@ export default function App() {
   const [isPinManagerOpen, setIsPinManagerOpen] = useState<boolean>(false);
   const [unlockTarget, setUnlockTarget] = useState<{ unitId: string; unitNama: string } | null>(null);
 
+  const isPseSession =
+    authSession?.unitNama === 'Seksi PSE' ||
+    authSession?.unitId === 'div-pse' ||
+    (authSession?.unitNama ? isDivisionMatch(authSession.unitNama, 'Seksi PSE') : false);
+
   // 2. Filters & Navigation Tabs
   const [activeTab, setActiveTab] = useState<SubMenuKey>('dashboard_keseluruhan');
+  const [returnTab, setReturnTab] = useState<{ tab: SubMenuKey; label: string } | null>(null);
   const [preselectedProgram2026, setPreselectedProgram2026] = useState<ProgramKerja | null>(null);
   const [planningSeksiTarget, setPlanningSeksiTarget] = useState<string>('Seksi Liturgi');
   const [selectedYear, setSelectedYear] = useState<'all' | 2026 | 2027>('all');
@@ -274,6 +281,15 @@ export default function App() {
   const handleResetPenerimaan = async () => {
     await dbService.resetPenerimaan();
     showToast('Data penerimaan kas dikembalikan ke data awal.');
+  };
+
+  const handleSaveProgramFromTable = async (updatedProg: ProgramKerja) => {
+    await dbService.saveProgram(updatedProg);
+    setPrograms((prev) => prev.map((p) => (p.id === updatedProg.id ? updatedProg : p)));
+    if (currentId === updatedProg.id) {
+      setFormData(updatedProg);
+    }
+    showToast(`Perubahan program "${updatedProg.namaProgram}" berhasil disimpan oleh Pastor Paroki / Admin.`);
   };
 
   const handleResetJabatan = async () => {
@@ -649,12 +665,21 @@ export default function App() {
     }
 
     const now = new Date().toISOString();
+    const isPastorOrAdmin =
+      authSession?.role === 'pastor_paroki' ||
+      authSession?.role === 'bendahara' ||
+      authSession?.role === 'semua_seksi';
     const updated: ProgramKerja = {
       ...(formData as ProgramKerja),
       id: currentId,
+      diubahOleh: isPastorOrAdmin
+        ? (authSession?.unitNama || 'Pastor Paroki / Admin')
+        : (formData.diubahOleh || authSession?.unitNama || 'Pastor Paroki / Admin'),
+      tanggalPerubahan: now,
       updatedAt: now,
     };
     dbService.saveProgram(updated);
+    setPrograms((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
     setHasUnsavedChanges(false);
     showToast('Data program kerja berhasil disimpan ke Cloud & Lokal!');
   };
@@ -1112,6 +1137,8 @@ export default function App() {
                 activeTab={activeTab}
                 onSelectTab={setActiveTab}
                 isBendahara={authSession?.role === 'bendahara'}
+                isPastorOrAdmin={authSession?.role === 'pastor_paroki'}
+                authSession={authSession}
               />
 
           {/* KONTROL KHUSUS TAB DASHBOARD: PILIHAN PERIODE & SEKSI TETAP DI ATAS SAAT SCROLL DOWN SEPERTI JUDUL */}
@@ -1222,141 +1249,171 @@ export default function App() {
             </div>
           )}
 
-          {/* KONTROL KHUSUS TAB INPUT: FILTER 1 BARIS & DROPDOWN PEMILIH PROGRAM */}
+          {/* KONTROL KHUSUS TAB INPUT: FILTER 1 BARIS & DROPDOWN PEMILIH PROGRAM ATAU FOKUS SATU PROGRAM */}
           {activeTab === 'input_program' && (
-            <>
-              {/* FILTER DRAGDOWN: TAHUN, BULAN, & SEKSI (HANYA 1 BARIS & UKURAN LEBIH KECIL) */}
-              <div className="grid grid-cols-3 gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-                {/* 1. Dragdown Pilihan Tahun Anggaran */}
-                <div className="relative min-w-0">
-                  <select
-                    value={selectedYear}
-                    onChange={(e) => {
-                      const val = e.target.value === 'all' ? 'all' : (parseInt(e.target.value, 10) as 2026 | 2027);
-                      setSelectedYear(val);
-                    }}
-                    className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
-                    title="Filter Berdasarkan Tahun Anggaran"
-                  >
-                    <option value="all">Semua Tahun</option>
-                    <option value={2026}>Tahun 2026</option>
-                    <option value={2027}>Tahun 2027</option>
-                  </select>
-                  <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
-                </div>
-
-                {/* 2. Dragdown Pilihan Bulan Kegiatan */}
-                <div className="relative min-w-0">
-                  <select
-                    value={selectedMonth}
-                    onChange={(e) => {
-                      const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10);
-                      setSelectedMonth(val);
-                    }}
-                    className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
-                    title="Filter Berdasarkan Bulan Kegiatan"
-                  >
-                    <option value="all">Semua Bulan</option>
-                    {monthCounts.map((m) => (
-                      <option key={m.no} value={m.no}>
-                        {m.singkatan || m.nama.slice(0, 3)} ({m.count})
-                      </option>
-                    ))}
-                  </select>
-                  <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
-                </div>
-
-                {/* 3. Dragdown Pilihan DPPH / Seksi */}
-                <div className="relative min-w-0">
-                  <select
-                    value={selectedSeksi}
-                    onChange={(e) => handleSelectSeksiWithAuth(e.target.value)}
-                    className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
-                    title="Filter Berdasarkan DPPH / Seksi"
-                    disabled={authSession?.role === 'seksi'}
-                  >
-                    {authSession?.role === 'seksi' ? (
-                      <option value={authSession.unitNama}>
-                        {authSession.unitNama} ({prokersInSelectedMonthAndYear.length})
-                      </option>
-                    ) : (
-                      <>
-                        <option value="all">Semua DPPH & Seksi</option>
-                        {DAFTAR_DIVISI.map((div) => {
-                          const isCurrentActive = isDivisionMatch(selectedSeksi, div);
-                          const showCount = selectedSeksi !== 'all' && isCurrentActive;
-
-                          return (
-                            <option key={div} value={div}>
-                              {div}{showCount ? ` (${prokersInSelectedMonthAndYear.length})` : ''}
-                            </option>
-                          );
-                        })}
-                      </>
-                    )}
-                  </select>
-                  <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
-                </div>
-              </div>
-
-              {/* 3. DROPDOWN (DRAGDOWN) PEMILIHAN PROGRAM & PREV/NEXT NAVIGATION */}
-              <div className="bg-slate-100/80 p-1.5 rounded-lg border border-slate-200">
-                <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500 mb-1 px-0.5">
-                  <span>Pilih Program Kerja:</span>
-                  <span className="tabular-nums">
-                    {filteredPrograms.length > 0
-                      ? `Data ${currentIndex + 1} dari ${filteredPrograms.length}`
-                      : '0 data'}
+            returnTab ? (
+              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 p-2.5 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="px-2 py-1 bg-indigo-700 text-white rounded-md text-[10px] font-black shrink-0 tracking-wider">
+                    FOKUS SATU PROGRAM
                   </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-slate-900 truncate">
+                      [{currentProgram?.tahun}] {currentProgram?.namaProgram}
+                    </p>
+                    <p className="text-[10.5px] text-slate-600 font-bold truncate">
+                      Seksi: {currentProgram?.penanggungjawab?.divisi} · Alokasi: {formatRupiah(currentProgram?.estimasiAnggaran || 0)}
+                    </p>
+                  </div>
                 </div>
-
-                <div className="flex items-center gap-1.5">
-                  {/* Tombol Sebelumnya */}
-                  <button
-                    type="button"
-                    onClick={handlePrev}
-                    disabled={currentIndex <= 0}
-                    className="w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors shadow-2xs"
-                    title="Pilih Data Sebelumnya"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </button>
-
-                  {/* The Dragdown / Dropdown Selector */}
-                  <div className="flex-1 relative min-w-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const dest = returnTab.tab;
+                    setReturnTab(null);
+                    setActiveTab(dest);
+                  }}
+                  className="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-indigo-950 border border-indigo-300 rounded-lg text-xs font-black shrink-0 cursor-pointer shadow-xs transition-colors flex items-center gap-1.5"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5 text-indigo-700" />
+                  <span>← Kembali ke {returnTab.label}</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* FILTER DRAGDOWN: TAHUN, BULAN, & SEKSI (HANYA 1 BARIS & UKURAN LEBIH KECIL) */}
+                <div className="grid grid-cols-3 gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                  {/* 1. Dragdown Pilihan Tahun Anggaran */}
+                  <div className="relative min-w-0">
                     <select
-                      value={currentId}
-                      onChange={(e) => setCurrentId(e.target.value)}
-                      className="w-full h-8 bg-white border border-slate-300 rounded-md px-2 pr-6 text-[11px] font-bold text-slate-900 truncate focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs"
+                      value={selectedYear}
+                      onChange={(e) => {
+                        const val = e.target.value === 'all' ? 'all' : (parseInt(e.target.value, 10) as 2026 | 2027);
+                        setSelectedYear(val);
+                      }}
+                      className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                      title="Filter Berdasarkan Tahun Anggaran"
                     >
-                      {filteredPrograms.length === 0 ? (
-                        <option value="">(Tidak ada program yang cocok dengan filter)</option>
+                      <option value="all">Semua Tahun</option>
+                      <option value={2026}>Tahun 2026</option>
+                      <option value={2027}>Tahun 2027</option>
+                    </select>
+                    <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
+                  </div>
+
+                  {/* 2. Dragdown Pilihan Bulan Kegiatan */}
+                  <div className="relative min-w-0">
+                    <select
+                      value={selectedMonth}
+                      onChange={(e) => {
+                        const val = e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10);
+                        setSelectedMonth(val);
+                      }}
+                      className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                      title="Filter Berdasarkan Bulan Kegiatan"
+                    >
+                      <option value="all">Semua Bulan</option>
+                      {monthCounts.map((m) => (
+                        <option key={m.no} value={m.no}>
+                          {m.singkatan || m.nama.slice(0, 3)} ({m.count})
+                        </option>
+                      ))}
+                    </select>
+                    <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
+                  </div>
+
+                  {/* 3. Dragdown Pilihan DPPH / Seksi */}
+                  <div className="relative min-w-0">
+                    <select
+                      value={selectedSeksi}
+                      onChange={(e) => handleSelectSeksiWithAuth(e.target.value)}
+                      className="w-full h-7 bg-white border border-slate-300 rounded-md pl-1.5 pr-4 text-[10px] font-bold text-slate-900 focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs truncate"
+                      title="Filter Berdasarkan DPPH / Seksi"
+                      disabled={authSession?.role === 'seksi'}
+                    >
+                      {authSession?.role === 'seksi' ? (
+                        <option value={authSession.unitNama}>
+                          {authSession.unitNama} ({prokersInSelectedMonthAndYear.length})
+                        </option>
                       ) : (
-                        filteredPrograms.map((p, idx) => (
-                          <option key={p.id} value={p.id}>
-                            {idx + 1}. [{p.tahun}] {p.namaProgram} · {formatRupiah(p.estimasiAnggaran)}
-                          </option>
-                        ))
+                        <>
+                          <option value="all">Semua DPPH & Seksi</option>
+                          {DAFTAR_DIVISI.map((div) => {
+                            const isCurrentActive = isDivisionMatch(selectedSeksi, div);
+                            const showCount = selectedSeksi !== 'all' && isCurrentActive;
+
+                            return (
+                              <option key={div} value={div}>
+                                {div}{showCount ? ` (${prokersInSelectedMonthAndYear.length})` : ''}
+                              </option>
+                            );
+                          })}
+                        </>
                       )}
                     </select>
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[9px]">
-                      ▼
+                    <span className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
+                  </div>
+                </div>
+
+                {/* 3. DROPDOWN (DRAGDOWN) PEMILIHAN PROGRAM & PREV/NEXT NAVIGATION */}
+                <div className="bg-slate-100/80 p-1.5 rounded-lg border border-slate-200">
+                  <div className="flex items-center justify-between text-[10px] font-semibold text-slate-500 mb-1 px-0.5">
+                    <span>Pilih Program Kerja:</span>
+                    <span className="tabular-nums">
+                      {filteredPrograms.length > 0
+                        ? `Data ${currentIndex + 1} dari ${filteredPrograms.length}`
+                        : '0 data'}
                     </span>
                   </div>
 
-                  {/* Tombol Berikutnya */}
-                  <button
-                    type="button"
-                    onClick={handleNext}
-                    disabled={currentIndex >= filteredPrograms.length - 1}
-                    className="w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors shadow-2xs"
-                    title="Pilih Data Berikutnya"
-                  >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {/* Tombol Sebelumnya */}
+                    <button
+                      type="button"
+                      onClick={handlePrev}
+                      disabled={currentIndex <= 0}
+                      className="w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors shadow-2xs"
+                      title="Pilih Data Sebelumnya"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+
+                    {/* The Dragdown / Dropdown Selector */}
+                    <div className="flex-1 relative min-w-0">
+                      <select
+                        value={currentId}
+                        onChange={(e) => setCurrentId(e.target.value)}
+                        className="w-full h-8 bg-white border border-slate-300 rounded-md px-2 pr-6 text-[11px] font-bold text-slate-900 truncate focus:outline-none focus:border-slate-500 cursor-pointer shadow-2xs"
+                      >
+                        {filteredPrograms.length === 0 ? (
+                          <option value="">(Tidak ada program yang cocok dengan filter)</option>
+                        ) : (
+                          filteredPrograms.map((p, idx) => (
+                            <option key={p.id} value={p.id}>
+                              {idx + 1}. [{p.tahun}] {p.namaProgram} · {formatRupiah(p.estimasiAnggaran)}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[9px]">
+                        ▼
+                      </span>
+                    </div>
+
+                    {/* Tombol Berikutnya */}
+                    <button
+                      type="button"
+                      onClick={handleNext}
+                      disabled={currentIndex >= filteredPrograms.length - 1}
+                      className="w-8 h-8 rounded-md border border-slate-200 bg-white text-slate-700 flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-50 shrink-0 transition-colors shadow-2xs"
+                      title="Pilih Data Berikutnya"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </>
+              </>
+            )
           )}
         </>
       )}
@@ -1375,6 +1432,7 @@ export default function App() {
                 selectedSeksi={selectedSeksi}
                 onSelectSeksi={handleSelectSeksiWithAuth}
                 onOpenProgramDetail={(progId) => {
+                  setReturnTab({ tab: activeTab, label: 'Dashboard' });
                   setCurrentId(progId);
                   setActiveTab('input_program');
                 }}
@@ -1411,9 +1469,11 @@ export default function App() {
                 programs={programs}
                 penerimaanList={penerimaanList}
                 onSavePenerimaan={handleSavePenerimaan}
+                onSaveProgram={handleSaveProgramFromTable}
                 authSession={authSession}
                 onNavigateToPenerimaanTab={() => setActiveTab('keuangan_rencana_penerimaan')}
                 onOpenProgramDetail={(progId) => {
+                  setReturnTab({ tab: activeTab, label: 'Tabel Rencana & Program' });
                   setCurrentId(progId);
                   setActiveTab('input_program');
                 }}
@@ -1422,8 +1482,8 @@ export default function App() {
                   setEvaluatingMonth(targetMonth || (typeof selectedMonth === 'number' ? selectedMonth : 10));
                 }}
                 initialYear={selectedYear}
-                initialSeksi={selectedSeksi}
-                initialFocusMode="komparasi"
+                initialSeksi={isPseSession ? 'Seksi PSE' : selectedSeksi}
+                initialFocusMode={isPseSession ? 'pse_khusus' : 'komparasi'}
               />
             </ErrorBoundary>
           ) : activeTab === 'komparasi' || activeTab === 'perbandingan_program' ? (
@@ -1432,6 +1492,7 @@ export default function App() {
                 programs={programs}
                 authSession={authSession}
                 onOpenProgramDetail={(progId) => {
+                  setReturnTab({ tab: activeTab, label: 'Komparasi Program' });
                   setCurrentId(progId);
                   setActiveTab('input_program');
                 }}
@@ -1506,9 +1567,11 @@ export default function App() {
                 programs={programs}
                 penerimaanList={penerimaanList}
                 onSavePenerimaan={handleSavePenerimaan}
+                onSaveProgram={handleSaveProgramFromTable}
                 authSession={authSession}
                 onNavigateToPenerimaanTab={() => setActiveTab('keuangan_rencana_penerimaan')}
                 onOpenProgramDetail={(progId) => {
+                  setReturnTab({ tab: activeTab, label: 'Tabel Rencana & Penggunaan' });
                   setCurrentId(progId);
                   setActiveTab('input_program');
                 }}
@@ -1517,8 +1580,8 @@ export default function App() {
                   setEvaluatingMonth(targetMonth || (typeof selectedMonth === 'number' ? selectedMonth : 10));
                 }}
                 initialYear={selectedYear}
-                initialSeksi={selectedSeksi}
-                initialFocusMode="anggaran"
+                initialSeksi={isPseSession ? 'Seksi PSE' : selectedSeksi}
+                initialFocusMode={isPseSession ? 'pse_khusus' : 'anggaran'}
               />
             </ErrorBoundary>
           ) : activeTab === 'keuangan_tabel_kas' ? (
@@ -1527,9 +1590,11 @@ export default function App() {
                 programs={programs}
                 penerimaanList={penerimaanList}
                 onSavePenerimaan={handleSavePenerimaan}
+                onSaveProgram={handleSaveProgramFromTable}
                 authSession={authSession}
                 onNavigateToPenerimaanTab={() => setActiveTab('keuangan_rencana_penerimaan')}
                 onOpenProgramDetail={(progId) => {
+                  setReturnTab({ tab: activeTab, label: 'Tabel Rencana & Penggunaan' });
                   setCurrentId(progId);
                   setActiveTab('input_program');
                 }}
@@ -1538,8 +1603,31 @@ export default function App() {
                   setEvaluatingMonth(targetMonth || (typeof selectedMonth === 'number' ? selectedMonth : 10));
                 }}
                 initialYear={selectedYear}
-                initialSeksi={selectedSeksi}
-                initialFocusMode="komparasi"
+                initialSeksi={isPseSession ? 'Seksi PSE' : selectedSeksi}
+                initialFocusMode={isPseSession ? 'pse_khusus' : 'komparasi'}
+              />
+            </ErrorBoundary>
+          ) : activeTab === 'keuangan_pse' ? (
+            <ErrorBoundary>
+              <MonthlyCashFlowProjectionView
+                programs={programs}
+                penerimaanList={penerimaanList}
+                onSavePenerimaan={handleSavePenerimaan}
+                onSaveProgram={handleSaveProgramFromTable}
+                authSession={authSession}
+                onNavigateToPenerimaanTab={() => setActiveTab('keuangan_rencana_penerimaan')}
+                onOpenProgramDetail={(progId) => {
+                  setReturnTab({ tab: activeTab, label: 'Modul Khusus PSE' });
+                  setCurrentId(progId);
+                  setActiveTab('input_program');
+                }}
+                onOpenEvaluasi={(prog, targetMonth) => {
+                  setEvaluatingProgram(prog);
+                  setEvaluatingMonth(targetMonth || (typeof selectedMonth === 'number' ? selectedMonth : 10));
+                }}
+                initialYear={selectedYear}
+                initialSeksi="Seksi PSE"
+                initialFocusMode="pse_khusus"
               />
             </ErrorBoundary>
           ) : activeTab === 'pengurus' ? (
@@ -1617,6 +1705,27 @@ export default function App() {
             </div>
           ) : currentProgram ? (
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 space-y-4">
+              {/* Tombol Back / Kembali jika navigasi berasal dari tabel/komparasi/dashboard */}
+              {returnTab && (
+                <div className="bg-indigo-50 border border-indigo-200/90 p-2.5 rounded-xl flex items-center justify-between gap-2 animate-in fade-in">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const dest = returnTab.tab;
+                      setReturnTab(null);
+                      setActiveTab(dest);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-indigo-950 border border-indigo-300 rounded-lg text-xs font-black shadow-2xs cursor-pointer transition-colors"
+                  >
+                    <ArrowLeft className="w-4 h-4 text-indigo-700" />
+                    <span>← Kembali ke {returnTab.label}</span>
+                  </button>
+                  <span className="text-[11px] text-indigo-800 font-semibold hidden sm:inline">
+                    Sedang membuka detail program kerja dari <strong>{returnTab.label}</strong>
+                  </span>
+                </div>
+              )}
+
               {/* Highlight Banner Saat Filter Bulan Tertentu Aktif */}
               {selectedMonth !== 'all' && (
                 <div className="bg-emerald-50/90 border border-emerald-200 p-2.5 rounded-xl flex items-center justify-between text-xs">
@@ -2737,18 +2846,35 @@ export default function App() {
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  className={`h-10 px-5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all ${
-                    hasUnsavedChanges
-                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 animate-pulse'
-                      : 'bg-slate-900 hover:bg-slate-800 text-white shadow-slate-900/10'
-                  }`}
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>{hasUnsavedChanges ? 'Simpan Perubahan' : 'Tersimpan ✓'}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {returnTab && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const dest = returnTab.tab;
+                        setReturnTab(null);
+                        setActiveTab(dest);
+                      }}
+                      className="h-10 px-4 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5 text-indigo-700" />
+                      <span>Kembali ke {returnTab.label}</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    className={`h-10 px-5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all ${
+                      hasUnsavedChanges
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 animate-pulse'
+                        : 'bg-slate-900 hover:bg-slate-800 text-white shadow-slate-900/10'
+                    }`}
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{hasUnsavedChanges ? 'Simpan Perubahan' : 'Tersimpan ✓'}</span>
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
@@ -2772,33 +2898,66 @@ export default function App() {
           )}
         </main>
 
-        {/* 5. FIXED BOTTOM STICKY BAR: PREV / NEXT NAVIGATION (Hanya saat tab Input / Detail aktif) */}
+        {/* 5. FIXED BOTTOM STICKY BAR: PREV / NEXT NAVIGATION ATAU KEMBALI KE TABEL */}
         {activeTab === 'input_program' && (
           <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-lg print:hidden">
             <div className="max-w-xl md:max-w-2xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={handlePrev}
-                disabled={currentIndex <= 0}
-                className="flex-1 h-10 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-30 disabled:pointer-events-none transition-colors"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                <span>Sebelumnya</span>
-              </button>
+              {returnTab ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const dest = returnTab.tab;
+                      setReturnTab(null);
+                      setActiveTab(dest);
+                    }}
+                    className="flex-1 h-10 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                  >
+                    <ArrowLeft className="w-4 h-4 text-slate-600" />
+                    <span>Kembali ke {returnTab.label}</span>
+                  </button>
 
-              <span className="text-[11px] font-bold text-slate-500 tabular-nums shrink-0 px-1">
-                {filteredPrograms.length > 0 ? `${currentIndex + 1} / ${filteredPrograms.length}` : '0 / 0'}
-              </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSave();
+                      const dest = returnTab.tab;
+                      setReturnTab(null);
+                      setActiveTab(dest);
+                    }}
+                    className="flex-1 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Simpan &amp; Kembali ke Tabel</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handlePrev}
+                    disabled={currentIndex <= 0}
+                    className="flex-1 h-10 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    <span>Sebelumnya</span>
+                  </button>
 
-              <button
-                type="button"
-                onClick={handleNext}
-                disabled={currentIndex >= filteredPrograms.length - 1}
-                className="flex-1 h-10 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-30 disabled:pointer-events-none transition-colors shadow-xs"
-              >
-                <span>Berikutnya</span>
-                <ChevronRight className="w-4 h-4 text-emerald-400" />
-              </button>
+                  <span className="text-[11px] font-bold text-slate-500 tabular-nums shrink-0 px-1">
+                    {filteredPrograms.length > 0 ? `${currentIndex + 1} / ${filteredPrograms.length}` : '0 / 0'}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={handleNext}
+                    disabled={currentIndex >= filteredPrograms.length - 1}
+                    className="flex-1 h-10 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-30 disabled:pointer-events-none transition-colors shadow-xs"
+                  >
+                    <span>Berikutnya</span>
+                    <ChevronRight className="w-4 h-4 text-emerald-400" />
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}

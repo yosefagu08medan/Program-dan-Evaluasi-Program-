@@ -10,7 +10,7 @@ import { PenerimaanMingguan } from '../src/types/penerimaan';
 import { INITIAL_PENGURUS_PAROKI } from '../src/data/initialPengurus';
 import { INITIAL_MASTER_JABATAN } from '../src/data/initialJabatan';
 import { INITIAL_PENERIMAAN_MINGGUAN } from '../src/data/initialPenerimaan';
-import { normalizeDivisionName } from '../src/utils/formatters';
+import { normalizeDivisionName, getSundaysInMonth } from '../src/utils/formatters';
 import {
   collection,
   doc,
@@ -835,7 +835,54 @@ class DatabaseService {
       this.writeStorage(PENERIMAAN_STORAGE_KEY, INITIAL_PENERIMAAN_MINGGUAN);
       return INITIAL_PENERIMAAN_MINGGUAN;
     }
-    return cached;
+
+    // Sanitasi otomatis: hilangkan angka realisasi palsu/dummy dari data awal yang belum pernah diinput pengguna
+    const isRealisasiSanitized = this.readStorage<boolean>('proker_db_realisasi_sanitized_v4', false);
+    let workingList = cached;
+    if (!isRealisasiSanitized) {
+      workingList = cached.map((item) => {
+        let nama = item.namaPenerimaan;
+        let alokasi = item.alokasiSeksi;
+        let realisasiVal = item.realisasi;
+
+        // Reset data seed yang memiliki angka realisasi bawaan dummy
+        if (item.id.startsWith('pen_2026_') || item.id.startsWith('pen_2027_')) {
+          realisasiVal = 0;
+          if (alokasi === 'Seksi PSE') {
+            const nLower = (nama || '').toLowerCase();
+            if (nLower.includes('app') || nLower.includes('puasa')) {
+              nama = 'Dana Aksi Puasa Pembangunan';
+            } else if (nLower.includes('natal')) {
+              nama = 'Amplop Natal';
+            } else if (nLower.includes('kolekte') || item.kategori === 'kolekte_khusus') {
+              alokasi = 'Umum Paroki';
+            } else {
+              nama = 'Dana Solidaritas Umat';
+            }
+          }
+        }
+        return {
+          ...item,
+          namaPenerimaan: nama,
+          alokasiSeksi: alokasi,
+          realisasi: realisasiVal,
+        };
+      });
+      this.writeStorage('proker_db_realisasi_sanitized_v4', true);
+      this.writeStorage(PENERIMAAN_STORAGE_KEY, workingList);
+    }
+
+    // Filter out phantom routine weeks (e.g. routine Kolekte 1 & 2 for Minggu 5 in January 2026 which only has 4 Sundays)
+    const valid = workingList.filter((item) => {
+      if (item.isHariKhusus || item.kategori === 'kolekte_khusus') return true;
+      if (item.kategori !== 'kolekte_1' && item.kategori !== 'kolekte_2') return true;
+      const sundays = getSundaysInMonth(item.tahun, item.bulan);
+      return item.mingguKe <= sundays.length;
+    });
+    if (valid.length !== workingList.length) {
+      this.writeStorage(PENERIMAAN_STORAGE_KEY, valid);
+    }
+    return valid;
   }
 
   public subscribePenerimaan(listener: (penerimaan: PenerimaanMingguan[]) => void): () => void {
@@ -931,7 +978,16 @@ class DatabaseService {
           if (!snapshot.empty) {
             const cloudItems: PenerimaanMingguan[] = [];
             snapshot.forEach((d) => {
-              cloudItems.push(d.data() as PenerimaanMingguan);
+              const item = d.data() as PenerimaanMingguan;
+              // Bersihkan record kolekte rutin jika mingguKe melebihi hari Minggu kalender riil di bulan tersebut
+              if (!item.isHariKhusus && (item.kategori === 'kolekte_1' || item.kategori === 'kolekte_2')) {
+                const sundays = getSundaysInMonth(item.tahun, item.bulan);
+                if (item.mingguKe > sundays.length) {
+                  deleteDoc(d.ref).catch(() => {});
+                  return;
+                }
+              }
+              cloudItems.push(item);
             });
             cloudItems.sort((a, b) => {
               if (a.tahun !== b.tahun) return a.tahun - b.tahun;

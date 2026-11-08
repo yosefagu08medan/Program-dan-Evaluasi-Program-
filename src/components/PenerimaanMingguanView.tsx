@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Wallet,
   Plus,
@@ -48,6 +48,9 @@ import {
   BULAN_LIST,
   formatRupiah,
   formatCompactRupiah,
+  formatIndonesianDate,
+  getSundaysInMonth,
+  HARI_KHUSUS_PRESETS,
   getAlokasiBudgetBulanan,
   isProgramAktifDiBulan,
 } from '../utils/formatters';
@@ -115,11 +118,32 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
   const [defaultRancanganForModal, setDefaultRancanganForModal] = useState<number | undefined>(undefined);
   const [defaultRealisasiForModal, setDefaultRealisasiForModal] = useState<number | undefined>(undefined);
   const [showPolicyDetail, setShowPolicyDetail] = useState<boolean>(false);
-  const [viewMode, setViewMode] = useState<'matrix' | 'cards'>('matrix');
+  const [viewMode, setViewMode] = useState<'matrix' | 'cards'>(isSeksiPSE ? 'cards' : 'matrix');
+
+  useEffect(() => {
+    if (isSeksiPSE) {
+      setViewMode('cards');
+      setSelectedSeksi('Seksi PSE');
+    }
+  }, [isSeksiPSE]);
 
   // Filtered Penerimaan Data
   const filteredList = useMemo(() => {
     return penerimaanList.filter((item) => {
+      // Khusus login PSE: HANYA menampilkan rencana penerimaan dari PSE, KOLEKTE TIDAK PERLU DITAMPILKAN
+      if (isSeksiPSE) {
+        const isPseItem =
+          item.alokasiSeksi === 'Seksi PSE' ||
+          (item.namaPenerimaan && item.namaPenerimaan.toLowerCase().includes('pse'));
+        const isKolekte =
+          item.kategori === 'kolekte_1' ||
+          item.kategori === 'kolekte_2' ||
+          item.kategori === 'kolekte_khusus';
+        if (!isPseItem || isKolekte) {
+          return false;
+        }
+      }
+
       // Role-based visibility:
       // Seksi non-DPPH hanya dapat melihat penerimaan yang dialokasikan ke seksi mereka
       if (isSeksiUser && authSession?.unitNama && item.alokasiSeksi !== authSession.unitNama) {
@@ -312,7 +336,20 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
       weeks[w].push(item);
     });
 
-    return [1, 2, 3, 4, 5].map((w) => {
+    const activeWeeks =
+      selectedBulan === 'all'
+        ? [1, 2, 3, 4, 5]
+        : Array.from(
+            {
+              length: getSundaysInMonth(
+                selectedTahun !== 'all' ? selectedTahun : 2026,
+                selectedBulan as number
+              ).length,
+            },
+            (_, i) => (i + 1) as 1 | 2 | 3 | 4 | 5
+          );
+
+    return activeWeeks.map((w) => {
       const items = weeks[w] || [];
       const subRancangan = items.reduce((sum, i) => sum + (i.rancangan || 0), 0);
       const subRealisasi = items.reduce((sum, i) => sum + (i.realisasi || 0), 0);
@@ -327,7 +364,7 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
         subPersen,
       };
     });
-  }, [filteredList]);
+  }, [filteredList, selectedTahun, selectedBulan]);
 
   // Handle open add modal (Paroki / Bendahara)
   const handleOpenAddParoki = (mingguKe?: 1 | 2 | 3 | 4 | 5) => {
@@ -389,7 +426,7 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
     const targetMinggu = mingguKe || (selectedMinggu !== 'all' ? (selectedMinggu as 1 | 2 | 3 | 4 | 5) : 1);
     setEditingItem(null);
     setDefaultKategoriForModal('persembahan_umat');
-    setDefaultNamaForModal('Penerimaan Kas & Derma Kasih Seksi PSE');
+    setDefaultNamaForModal('Dana Solidaritas Umat');
     setDefaultRancanganForModal(5000000);
     setDefaultRealisasiForModal(0);
     setIsTentatifModalMode(false);
@@ -438,7 +475,15 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
     }
   };
 
-  const getWeekDateRangeLabel = (minggu: number, blnNum: number | 'all') => {
+  const getWeekDateRangeLabel = (minggu: number, blnNum: number | 'all', yr?: number | 'all') => {
+    if (blnNum !== 'all') {
+      const year = yr && yr !== 'all' ? yr : 2026;
+      const sundays = getSundaysInMonth(year, blnNum);
+      const sun = sundays[minggu - 1];
+      if (sun) {
+        return `Hari Minggu, ${sun.dayOfMonth} ${BULAN_LIST[blnNum - 1]?.nama} ${year}`;
+      }
+    }
     const blnName = blnNum !== 'all' ? BULAN_LIST[blnNum - 1]?.nama : 'Bulan';
     switch (minggu) {
       case 1:
@@ -456,29 +501,41 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
     }
   };
 
-  // If user is not authenticated at all, show the Auth Gate / Locked State
-  if (!authSession) {
+  // Sesuai instruksi: Rencana penerimaan kolekte & penggunaan dapat diakses oleh Pastor Paroki/Admin & Bendahara, serta Seksi PSE untuk dana sosial/dana umat
+  const isAuthorizedKeuangan = authSession?.role === 'pastor_paroki' || authSession?.role === 'bendahara' || isSeksiPSE;
+
+  if (!authSession || !isAuthorizedKeuangan) {
     return (
       <div className="bg-white rounded-3xl p-8 sm:p-10 border border-slate-200 text-center space-y-4 max-w-md mx-auto shadow-sm my-12 animate-in fade-in duration-200">
-        <div className="w-14 h-14 rounded-2xl bg-slate-900 text-emerald-400 flex items-center justify-center mx-auto shadow-md">
+        <div className="w-14 h-14 rounded-2xl bg-slate-900 text-amber-400 flex items-center justify-center mx-auto shadow-md">
           <Lock className="w-7 h-7" />
         </div>
         <div>
           <h3 className="text-base sm:text-lg font-black text-slate-900">
-            Akses Terbatas: Penerimaan Kas Paroki
+            Akses Khusus: Penerimaan Kas Paroki
           </h3>
-          <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-            Data penerimaan kas mingguan diisi oleh <strong>Bendahara</strong> dan hanya dapat diakses
-            oleh level <strong>DPPH</strong> dan <strong>Pastor Paroki / Admin</strong>.
+          <p className="text-xs text-slate-500 font-medium mt-1.5 leading-relaxed">
+            Data rencana dan realisasi penerimaan kas (Kolekte I, Kolekte II, dan Khusus) <strong>dapat diakses oleh login Pastor Paroki / Admin dan Bendahara Paroki</strong>.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => onPromptUnlockUnit?.('div-dpph', 'DPPH (Dewan Pastoral Paroki Harian)')}
-          className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-sm cursor-pointer"
-        >
-          Masukkan PIN Akses DPPH / Admin
-        </button>
+        <div className="space-y-2 pt-1">
+          <button
+            type="button"
+            onClick={() => onPromptUnlockUnit?.('bendahara', 'Bendahara Paroki')}
+            className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center justify-center gap-2"
+          >
+            <Lock className="w-4 h-4 text-emerald-200" />
+            <span>💰 Masuk Sebagai Bendahara Paroki</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onPromptUnlockUnit?.('admin', 'Pastor Paroki / Administrator')}
+            className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center justify-center gap-2"
+          >
+            <Lock className="w-4 h-4 text-amber-400" />
+            <span>👑 Masuk Sebagai Pastor Paroki / Admin</span>
+          </button>
+        </div>
       </div>
     );
   }
@@ -486,27 +543,37 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
   return (
     <div className="space-y-3 pb-8 animate-in fade-in duration-200">
       {/* 1. HERO HEADER COMPACT */}
-      <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 text-white shadow-sm border border-emerald-700/40">
+      <div className={`rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 text-white shadow-sm border ${
+        isSeksiPSE
+          ? 'bg-gradient-to-r from-amber-800 via-orange-800 to-slate-900 border-amber-600/40'
+          : 'bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 border-emerald-700/40'
+      }`}>
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
           {/* Sisi Kiri: Judul, Role & Subtitle Singkat */}
           <div className="flex items-center gap-2 flex-wrap min-w-0">
             <h1 className="text-base sm:text-lg font-black tracking-tight text-white whitespace-nowrap">
-              Penerimaan Kolekte &amp; Kas Paroki
+              {isSeksiPSE ? 'Penerimaan Kas & Derma Kasih Seksi PSE' : 'Penerimaan Kolekte & Kas Paroki'}
             </h1>
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-200 text-[11px] font-bold shrink-0">
-              <ShieldCheck className="w-3 h-3 text-emerald-300" />
+            <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
+              isSeksiPSE
+                ? 'bg-amber-500/20 border border-amber-400/40 text-amber-200'
+                : 'bg-emerald-500/20 border border-emerald-400/30 text-emerald-200'
+            }`}>
+              <ShieldCheck className="w-3 h-3 text-amber-300" />
               {isBendahara ? (
                 <span>Bendahara • Input Kolekte</span>
               ) : isSeksiPSE ? (
-                <span>Seksi PSE • Rencana &amp; Realisasi</span>
+                <span>Seksi PSE • Dana Umat Mandiri</span>
               ) : isAuthorizedGlobal ? (
                 <span>Pastor Paroki &amp; DPPH</span>
               ) : (
                 <span>{authSession?.unitNama || 'Seksi'}</span>
               )}
             </div>
-            <span className="hidden xl:inline text-xs text-emerald-200/60 font-medium">
-              • Kolekte I (50:50), Kolekte II (Pembangunan), PSE &amp; Tentatif
+            <span className={`hidden xl:inline text-xs font-medium ${isSeksiPSE ? 'text-amber-200/90' : 'text-emerald-200/60'}`}>
+              {isSeksiPSE
+                ? '• Dana APP, Aksi Natal, Kotak Kasih & Donatur Sosial (Terpisah dari Kolekte Paroki)'
+                : '• Kolekte I (50:50), Kolekte II (Pembangunan), PSE & Tentatif'}
             </span>
           </div>
 
@@ -530,7 +597,7 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
               title="Input Rencana Penerimaan & Realisasi Kas"
             >
               <Plus className="w-3.5 h-3.5 stroke-[3]" />
-              <span>+ Input Rencana</span>
+              <span>{isSeksiPSE ? '+ Input Penerimaan PSE' : '+ Input Rencana'}</span>
             </button>
 
             {/* Tombol Khusus Bendahara: Kolekte I & II */}
@@ -760,7 +827,18 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
               >
                 Semua
               </button>
-              {[1, 2, 3, 4, 5].map((w) => (
+              {(selectedBulan === 'all'
+                ? [1, 2, 3, 4, 5]
+                : Array.from(
+                    {
+                      length: getSundaysInMonth(
+                        selectedTahun !== 'all' ? selectedTahun : 2026,
+                        selectedBulan as number
+                      ).length,
+                    },
+                    (_, i) => (i + 1) as 1 | 2 | 3 | 4 | 5
+                  )
+              ).map((w) => (
                 <button
                   key={w}
                   type="button"
@@ -833,8 +911,12 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
               onChange={(e) => setSelectedKategori(e.target.value as KategoriPenerimaan | 'all')}
               className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-emerald-600"
             >
-              <option value="all">Semua Kategori</option>
-              {KATEGORI_PENERIMAAN_LIST.map((k) => (
+              <option value="all">Semua Kategori {isSeksiPSE ? 'PSE' : ''}</option>
+              {KATEGORI_PENERIMAAN_LIST.filter((k) =>
+                isSeksiPSE
+                  ? !['kolekte_1', 'kolekte_2', 'kolekte_khusus'].includes(k.id)
+                  : true
+              ).map((k) => (
                 <option key={k.id} value={k.id}>
                   {k.label}
                 </option>
@@ -974,43 +1056,57 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
       </div>
 
       {/* 3B. COMPACT POLICY SUMMARY STRIP & TOGGLE */}
-      <div className="bg-gradient-to-r from-blue-50/70 via-emerald-50/50 to-purple-50/50 rounded-xl p-2.5 sm:px-3.5 sm:py-2 border border-slate-200/90 shadow-2xs flex flex-wrap items-center justify-between gap-2.5 text-xs">
-        <div className="flex flex-wrap items-center gap-2 sm:gap-4 font-bold text-slate-700">
-          <div className="flex items-center gap-1.5 text-blue-900">
-            <Scale className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-            <span className="text-[11px] text-slate-500 font-semibold">Kol I (50:50):</span>
-            <span className="text-[11px] font-black text-blue-900">Solidaritas {formatRupiah(metrics.kolekte1Stats.danaSolidaritas)}</span>
-            <span className="text-slate-300">|</span>
-            <span className="text-[11px] font-black text-emerald-800">Proker {formatRupiah(metrics.kolekte1Stats.danaOperasionalDanProker)}</span>
+      {isSeksiPSE ? (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl p-2.5 sm:px-3.5 sm:py-2 border border-amber-300 shadow-2xs flex items-center justify-between gap-2.5 text-xs">
+          <div className="flex items-center gap-2 font-bold text-amber-950">
+            <Heart className="w-4 h-4 text-amber-600 fill-amber-500 shrink-0" />
+            <span>
+              Penerimaan Dana Kasih Umat Seksi PSE (APP, Aksi Natal &amp; Kotak Solidaritas) dikelola mandiri terpisah dari kas kolekte umum paroki.
+            </span>
           </div>
-
-          <div className="flex items-center gap-1.5 text-emerald-900">
-            <Hammer className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-            <span className="text-[11px] text-slate-500 font-semibold">Kol II:</span>
-            <span className="text-[11px] font-black text-emerald-900">Tersimpan {formatRupiah(metrics.kolekte2Stats.saldoTersimpan)}</span>
-          </div>
-
-          {metrics.pseStats?.realisasi > 0 && (
-            <div className="flex items-center gap-1.5 text-amber-900">
-              <Heart className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-              <span className="text-[11px] text-slate-500 font-semibold">PSE:</span>
-              <span className="text-[11px] font-black text-amber-900">{formatRupiah(metrics.pseStats.realisasi)}</span>
-            </div>
-          )}
+          <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 text-[10px] font-black uppercase shrink-0">
+            Non-Kolekte
+          </span>
         </div>
+      ) : (
+        <div className="bg-gradient-to-r from-blue-50/70 via-emerald-50/50 to-purple-50/50 rounded-xl p-2.5 sm:px-3.5 sm:py-2 border border-slate-200/90 shadow-2xs flex flex-wrap items-center justify-between gap-2.5 text-xs">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 font-bold text-slate-700">
+            <div className="flex items-center gap-1.5 text-blue-900">
+              <Scale className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span className="text-[11px] text-slate-500 font-semibold">Kol I (50:50):</span>
+              <span className="text-[11px] font-black text-blue-900">Solidaritas {formatRupiah(metrics.kolekte1Stats.danaSolidaritas)}</span>
+              <span className="text-slate-300">|</span>
+              <span className="text-[11px] font-black text-emerald-800">Proker {formatRupiah(metrics.kolekte1Stats.danaOperasionalDanProker)}</span>
+            </div>
 
-        <button
-          type="button"
-          onClick={() => setShowPolicyDetail(!showPolicyDetail)}
-          className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-slate-900 hover:bg-white/80 px-2.5 py-1 rounded-lg border border-slate-200 transition-colors cursor-pointer"
-        >
-          <span>{showPolicyDetail ? 'Tutup Aturan' : 'Detail Aturan 50:50 & Pembangunan'}</span>
-          {showPolicyDetail ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-        </button>
-      </div>
+            <div className="flex items-center gap-1.5 text-emerald-900">
+              <Hammer className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="text-[11px] text-slate-500 font-semibold">Kol II:</span>
+              <span className="text-[11px] font-black text-emerald-900">Tersimpan {formatRupiah(metrics.kolekte2Stats.saldoTersimpan)}</span>
+            </div>
 
-      {/* 3B. KARTU KHUSUS KEBIJAKAN FINANSIAL (Hanya saat showPolicyDetail === true) */}
-      {showPolicyDetail && (
+            {metrics.pseStats?.realisasi > 0 && (
+              <div className="flex items-center gap-1.5 text-amber-900">
+                <Heart className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span className="text-[11px] text-slate-500 font-semibold">PSE:</span>
+                <span className="text-[11px] font-black text-amber-900">{formatRupiah(metrics.pseStats.realisasi)}</span>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowPolicyDetail(!showPolicyDetail)}
+            className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-slate-900 hover:bg-white/80 px-2.5 py-1 rounded-lg border border-slate-200 transition-colors cursor-pointer"
+          >
+            <span>{showPolicyDetail ? 'Tutup Aturan' : 'Detail Aturan 50:50 & Pembangunan'}</span>
+            {showPolicyDetail ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+      )}
+
+      {/* 3B. KARTU KHUSUS KEBIJAKAN FINANSIAL (Hanya saat showPolicyDetail === true dan BUKAN Seksi PSE) */}
+      {!isSeksiPSE && showPolicyDetail && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 animate-in fade-in duration-150">
         {/* KARTU 1: ATURAN 50:50 KOLEKTE I */}
         <div className="bg-white rounded-3xl p-5 border border-blue-200/90 shadow-2xs space-y-3 flex flex-col justify-between">
@@ -1353,46 +1449,48 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
       </div>
       )}
 
-      {/* 4. MODE SWITCHER: 1 LAYAR BULANAN vs RINCIAN DETAIL MINGGUAN */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-        <div className="inline-flex p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-bold">
-          <button
-            type="button"
-            onClick={() => setViewMode('matrix')}
-            className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-              viewMode === 'matrix'
-                ? 'bg-emerald-700 text-white font-black shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <span>⚡</span>
-            <span>Input Kolekte 1 Layar Per Bulan</span>
-            <span className="text-[9.5px] bg-white/20 text-white px-1.5 py-0.2 rounded-full font-extrabold ml-0.5">
-              Cepat
+      {/* 4. MODE SWITCHER: 1 LAYAR BULANAN vs RINCIAN DETAIL MINGGUAN (TIDAK DITAMPILKAN UTK LOGIN PSE) */}
+      {!isSeksiPSE && (
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+          <div className="inline-flex p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => setViewMode('matrix')}
+              className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+                viewMode === 'matrix'
+                  ? 'bg-emerald-700 text-white font-black shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>⚡</span>
+              <span>Input Kolekte 1 Layar Per Bulan</span>
+              <span className="text-[9.5px] bg-white/20 text-white px-1.5 py-0.2 rounded-full font-extrabold ml-0.5">
+                Cepat
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('cards')}
+              className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+                viewMode === 'cards'
+                  ? 'bg-emerald-700 text-white font-black shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>📋</span>
+              <span>Rincian Transaksi Mingguan &amp; Seksi</span>
+            </button>
+          </div>
+
+          {viewMode === 'matrix' && (
+            <span className="text-[11px] text-slate-500 font-medium">
+              💡 Isi langsung rencana &amp; realisasi semua minggu tanpa buka-tutup jendela modal.
             </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('cards')}
-            className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-              viewMode === 'cards'
-                ? 'bg-emerald-700 text-white font-black shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <span>📋</span>
-            <span>Rincian Transaksi Mingguan &amp; Seksi</span>
-          </button>
+          )}
         </div>
+      )}
 
-        {viewMode === 'matrix' && (
-          <span className="text-[11px] text-slate-500 font-medium">
-            💡 Isi langsung rencana &amp; realisasi semua minggu tanpa buka-tutup jendela modal.
-          </span>
-        )}
-      </div>
-
-      {viewMode === 'matrix' ? (
+      {viewMode === 'matrix' && !isSeksiPSE ? (
         <MonthlyKolekteMatrix
           tahun={selectedTahun !== 'all' ? (selectedTahun as 2026 | 2027) : 2026}
           bulan={selectedBulan !== 'all' ? (selectedBulan as number) : 1}
@@ -1433,7 +1531,7 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
                         Minggu ke-{week.mingguKe}
                       </h3>
                       <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
-                        {getWeekDateRangeLabel(week.mingguKe, selectedBulan)}
+                        {getWeekDateRangeLabel(week.mingguKe, selectedBulan, selectedTahun)}
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-400 font-medium">
@@ -1628,12 +1726,21 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
                             <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
                               {/* Tanggal & Badge Kategori */}
                               <td className="py-2 pl-2 pr-2.5 align-top whitespace-nowrap">
-                                <div className="font-extrabold text-slate-900 text-xs">{item.tanggal}</div>
-                                <span
-                                  className={`inline-block mt-0.5 px-2 py-0.2 rounded-full text-[9px] font-black border ${meta.badgeColor}`}
-                                >
-                                  {meta.label}
-                                </span>
+                                <div className="font-extrabold text-slate-900 text-xs">
+                                  {formatIndonesianDate(item.tanggal, true)}
+                                </div>
+                                <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                                  <span
+                                    className={`inline-block px-2 py-0.2 rounded-full text-[9px] font-black border ${meta.badgeColor}`}
+                                  >
+                                    {meta.label}
+                                  </span>
+                                  {item.isHariKhusus && (
+                                    <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-purple-100 text-purple-900 border border-purple-300">
+                                      ⭐ Hari Khusus
+                                    </span>
+                                  )}
+                                </div>
                               </td>
 
                               {/* Uraian Penerimaan */}

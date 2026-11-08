@@ -42,8 +42,6 @@ export const DownloadPdfModal: React.FC<DownloadPdfModalProps> = ({
   selectedYear,
   pengurusList,
 }) => {
-  if (!isOpen) return null;
-
   const isPastorOrAdmin =
     authSession?.role === 'pastor_paroki' || authSession?.role === 'semua_seksi';
 
@@ -153,6 +151,8 @@ export const DownloadPdfModal: React.FC<DownloadPdfModalProps> = ({
     month: 'long',
     year: 'numeric',
   });
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200 print:static print:p-0 print:bg-white print:z-auto">
