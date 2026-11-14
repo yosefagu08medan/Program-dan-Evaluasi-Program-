@@ -35,8 +35,14 @@ import {
   ExternalLink,
   FileText,
   Edit3,
+  Search,
+  Send,
+  AlertCircle,
+  Eye,
+  MessageSquare,
+  ClipboardList,
 } from 'lucide-react';
-import { ProgramKerja } from '../types/proker';
+import { ProgramKerja, CatatanRevisiAnggaran } from '../types/proker';
 import { PenerimaanMingguan, calculateKolekte1Split } from '../types/penerimaan';
 import { PenerimaanFormModal } from './PenerimaanFormModal';
 import { PseRealisasiPenggunaanModal } from './PseRealisasiPenggunaanModal';
@@ -53,6 +59,7 @@ import {
   isProgramBerulang,
   getKategoriProgramInfo,
   getEvaluasiForMonth,
+  getProgramExecutionSummary,
   getSundaysInMonth,
 } from '../utils/formatters';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
@@ -127,6 +134,17 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
   // State accordion list per Seksi untuk Sisi 2 (Rencana Kebutuhan Anggaran Proker)
   const [expandedSeksis, setExpandedSeksis] = useState<Record<string, boolean>>({});
 
+  // State Mode Review Detail Program per Bulan & Catatan Revisi Anggaran
+  const [reviewingMonth, setReviewingMonth] = useState<number | null>(null);
+  const [reviewSearch, setReviewSearch] = useState<string>('');
+  const [reviewSeksiFilter, setReviewSeksiFilter] = useState<string>('all');
+  const [reviewStatusFilter, setReviewStatusFilter] = useState<'all' | 'perlu_revisi' | 'belum_catatan'>('all');
+  const [reviewSortBy, setReviewSortBy] = useState<'anggaran_desc' | 'seksi'>('anggaran_desc');
+  const [activeRevisionFormId, setActiveRevisionFormId] = useState<string | null>(null);
+  const [revisionNoteDraft, setRevisionNoteDraft] = useState<string>('');
+  const [revisionBudgetDraft, setRevisionBudgetDraft] = useState<string>('');
+  const [revisionSavedFeedback, setRevisionSavedFeedback] = useState<{ programId?: string; message: string } | null>(null);
+
   const toggleSeksi = (seksiName: string) => {
     setExpandedSeksis((prev) => ({
       ...prev,
@@ -136,6 +154,128 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
 
   const collapseAllSeksis = () => {
     setExpandedSeksis({});
+  };
+
+  const openReviewMonth = (monthNum: number, focusProgram?: ProgramKerja) => {
+    setActiveMonth(monthNum);
+    setReviewingMonth(monthNum);
+    setReviewSearch('');
+    setReviewSeksiFilter('all');
+    setReviewStatusFilter('all');
+    setRevisionSavedFeedback(null);
+    if (focusProgram) {
+      setActiveRevisionFormId(focusProgram.id);
+      setRevisionNoteDraft(focusProgram.catatanRevisiAnggaran?.catatan || '');
+      setRevisionBudgetDraft(
+        focusProgram.catatanRevisiAnggaran?.rekomendasiAnggaran
+          ? String(focusProgram.catatanRevisiAnggaran.rekomendasiAnggaran)
+          : ''
+      );
+    } else {
+      setActiveRevisionFormId(null);
+      setRevisionNoteDraft('');
+      setRevisionBudgetDraft('');
+    }
+  };
+
+  const closeReviewMonth = () => {
+    setReviewingMonth(null);
+    setActiveRevisionFormId(null);
+    setRevisionNoteDraft('');
+    setRevisionBudgetDraft('');
+    setRevisionSavedFeedback(null);
+  };
+
+  const openRevisionForm = (prog: ProgramKerja) => {
+    setActiveRevisionFormId(prog.id);
+    setRevisionNoteDraft(prog.catatanRevisiAnggaran?.catatan || '');
+    setRevisionBudgetDraft(
+      prog.catatanRevisiAnggaran?.rekomendasiAnggaran
+        ? String(prog.catatanRevisiAnggaran.rekomendasiAnggaran)
+        : ''
+    );
+    setRevisionSavedFeedback(null);
+  };
+
+  const handleSaveRevisionNote = (prog: ProgramKerja, monthNum: number) => {
+    const cleanNote = revisionNoteDraft.trim();
+    if (!cleanNote || !onSaveProgram) return;
+
+    const numericBudget = revisionBudgetDraft.replace(/[^\d]/g, '');
+    const parsedBudget = numericBudget ? parseInt(numericBudget, 10) : undefined;
+    const targetMonthName = BULAN_LIST[monthNum - 1]?.nama || `Bulan ${monthNum}`;
+    const reviewerName = authSession?.unitNama || 'Admin / Bendahara Paroki';
+    const targetRecipient = prog.penanggungjawab?.nama
+      ? `${prog.penanggungjawab?.divisi || 'Seksi'} (${prog.penanggungjawab.nama})`
+      : prog.penanggungjawab?.divisi || 'Seksi Penanggung Jawab';
+
+    const revisiObj: CatatanRevisiAnggaran = {
+      perluRevisi: true,
+      catatan: cleanNote,
+      targetBulan: monthNum,
+      ...(parsedBudget && parsedBudget > 0 ? { rekomendasiAnggaran: parsedBudget } : {}),
+      ditujukanKepada: targetRecipient,
+      dibuatOleh: reviewerName,
+      tanggalCatatan: new Date().toISOString(),
+      statusTindakLanjut: 'menunggu_revisi',
+    };
+
+    const updatedProg: ProgramKerja = {
+      ...prog,
+      catatanRevisiAnggaran: revisiObj,
+      catatanAdmin: `[Revisi Anggaran Bln ${targetMonthName}] ${cleanNote}`,
+      ...(prog.tahun === 2027
+        ? {
+            catatanPastorParoki: {
+              ...(prog.catatanPastorParoki || {}),
+              statusPersetujuan: 'perlu_revisi' as const,
+              catatan: cleanNote,
+              ...(parsedBudget && parsedBudget > 0 ? { rekomendasiAnggaran: parsedBudget } : {}),
+              tanggalReview: new Date().toISOString(),
+              namaPastor: reviewerName,
+            },
+          }
+        : {}),
+    };
+
+    onSaveProgram(updatedProg);
+    setActiveRevisionFormId(null);
+    setRevisionNoteDraft('');
+    setRevisionBudgetDraft('');
+    setRevisionSavedFeedback({
+      programId: prog.id,
+      message: `Catatan revisi untuk "${prog.namaProgram}" berhasil disimpan & ditujukan kepada ${targetRecipient}.`,
+    });
+  };
+
+  const handleResolveOrClearRevision = (prog: ProgramKerja, mode: 'resolved' | 'clear') => {
+    if (!onSaveProgram) return;
+    const updatedRevisi: CatatanRevisiAnggaran =
+      mode === 'resolved'
+        ? {
+            ...(prog.catatanRevisiAnggaran || { perluRevisi: false, catatan: '' }),
+            perluRevisi: false,
+            statusTindakLanjut: 'sudah_direvisi',
+          }
+        : {
+            perluRevisi: false,
+            catatan: '',
+            statusTindakLanjut: 'sudah_direvisi',
+          };
+
+    const updatedProg: ProgramKerja = {
+      ...prog,
+      catatanRevisiAnggaran: updatedRevisi,
+    };
+    onSaveProgram(updatedProg);
+    setActiveRevisionFormId(null);
+    setRevisionSavedFeedback({
+      programId: prog.id,
+      message:
+        mode === 'resolved'
+          ? `Status revisi untuk "${prog.namaProgram}" ditandai selesai direvisi.`
+          : `Penandaan revisi untuk "${prog.namaProgram}" telah dihapus.`,
+    });
   };
 
   // Reset rincian terbuka saat bulan aktif berubah agar tampilan kembali ke ringkasan semula
@@ -558,6 +698,113 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
     );
   }, [pseMonthlyData, activeMonth]);
 
+  // Daftar bulan yang mengalami kekurangan / defisit anggaran (reguler & PSE)
+  const deficitMonths = useMemo(() => {
+    return monthlyData.months.filter(
+      (m) => m.totalDana > 0 && (m.selisihProyeksi < 0 || m.selisihProker < 0)
+    );
+  }, [monthlyData]);
+
+  const pseDeficitMonths = useMemo(() => {
+    return pseMonthlyData.months.filter((m) => m.totalAnggaran > 0 && m.selisih < 0);
+  }, [pseMonthlyData]);
+
+  const totalRevisionFlagged = useMemo(() => {
+    return filteredPrograms.filter((p) => p.catatanRevisiAnggaran?.perluRevisi).length;
+  }, [filteredPrograms]);
+
+  // Data lengkap untuk Mode Review Detail Program pada bulan yang sedang ditinjau
+  const reviewContext = useMemo(() => {
+    if (reviewingMonth === null) return null;
+    const monthName = BULAN_LIST[reviewingMonth - 1]?.nama || `Bulan ${reviewingMonth}`;
+    const isPseView = focusMode === 'pse_khusus';
+
+    let basePrograms: { program: ProgramKerja; alokasiDanaBulanIni: number }[] = [];
+    let totalKebutuhan = 0;
+    let totalPenerimaanTotal = 0;
+    let totalDanaSiapPakai = 0;
+    let selisihUtama = 0;
+
+    if (isPseView) {
+      const mData = pseMonthlyData.months.find((m) => m.monthNum === reviewingMonth);
+      basePrograms = (mData?.programs || []).map((program) => ({
+        program,
+        alokasiDanaBulanIni: getAlokasiBudgetBulanan(program, reviewingMonth),
+      }));
+      totalKebutuhan = mData?.totalAnggaran || 0;
+      totalPenerimaanTotal = mData?.totalPenerimaanRencana || 0;
+      totalDanaSiapPakai = mData?.totalPenerimaanRencana || 0;
+      selisihUtama = mData?.selisih || 0;
+    } else {
+      const mData = monthlyData.months.find((m) => m.monthNum === reviewingMonth);
+      basePrograms = mData?.items || [];
+      totalKebutuhan = mData?.totalDana || 0;
+      totalPenerimaanTotal = mData?.totalRencanaPenerimaan || 0;
+      totalDanaSiapPakai = mData?.danaBisaDipakaiProker || 0;
+      selisihUtama = mData ? (mData.selisihProker < 0 ? mData.selisihProker : mData.selisihProyeksi) : 0;
+    }
+
+    const seksiOptions = Array.from(
+      new Set(basePrograms.map((i) => i.program.penanggungjawab?.divisi || 'Seksi Lainnya'))
+    ).sort();
+
+    const filteredItems = basePrograms
+      .filter(({ program }) => {
+        if (reviewSeksiFilter !== 'all' && (program.penanggungjawab?.divisi || 'Seksi Lainnya') !== reviewSeksiFilter) {
+          return false;
+        }
+        if (reviewStatusFilter === 'perlu_revisi' && !program.catatanRevisiAnggaran?.perluRevisi) {
+          return false;
+        }
+        if (reviewStatusFilter === 'belum_catatan' && program.catatanRevisiAnggaran?.perluRevisi) {
+          return false;
+        }
+        if (reviewSearch.trim()) {
+          const q = reviewSearch.toLowerCase();
+          const matchNama = program.namaProgram.toLowerCase().includes(q);
+          const matchPj = (program.penanggungjawab?.nama || '').toLowerCase().includes(q);
+          const matchSeksi = (program.penanggungjawab?.divisi || '').toLowerCase().includes(q);
+          const matchTujuan = (program.tujuanKegiatan || '').toLowerCase().includes(q);
+          if (!matchNama && !matchPj && !matchSeksi && !matchTujuan) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (reviewSortBy === 'seksi') {
+          const divCmp = (a.program.penanggungjawab?.divisi || '').localeCompare(
+            b.program.penanggungjawab?.divisi || ''
+          );
+          if (divCmp !== 0) return divCmp;
+        }
+        return b.alokasiDanaBulanIni - a.alokasiDanaBulanIni;
+      });
+
+    const flaggedCount = basePrograms.filter((i) => i.program.catatanRevisiAnggaran?.perluRevisi).length;
+
+    return {
+      monthNum: reviewingMonth,
+      monthName,
+      isPseView,
+      totalPrograms: basePrograms.length,
+      totalKebutuhan,
+      totalPenerimaanTotal,
+      totalDanaSiapPakai,
+      selisihUtama,
+      seksiOptions,
+      filteredItems,
+      flaggedCount,
+    };
+  }, [
+    reviewingMonth,
+    focusMode,
+    pseMonthlyData,
+    monthlyData,
+    reviewSeksiFilter,
+    reviewStatusFilter,
+    reviewSearch,
+    reviewSortBy,
+  ]);
+
   const handlePrint = () => {
     window.print();
   };
@@ -744,7 +991,584 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
         </div>
       </div>
 
-      {focusMode === 'pse_khusus' ? (
+      {reviewingMonth !== null && reviewContext ? (
+        /* ======================================================== */
+        /* MODE REVIEW DETAIL PROGRAM & CATATAN REVISI PER BULAN    */
+        /* ======================================================== */
+        <div className="space-y-5 animate-in fade-in duration-200">
+          {/* STICKY TOP BAR: TOMBOL KEMBALI + NAVIGASI BULAN DEFISIT */}
+          <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-md space-y-4 border border-slate-800">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={closeReviewMonth}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-emerald-50 text-slate-900 rounded-xl text-xs font-black shadow-sm transition-all cursor-pointer"
+                >
+                  <ArrowLeft className="w-4 h-4 text-emerald-700" />
+                  <span>← Kembali ke Dashboard Penggunaan Dana &amp; Penerimaan</span>
+                </button>
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-400/30 uppercase">
+                      Mode Review Detail Program
+                    </span>
+                    {reviewContext.selisihUtama < 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white uppercase animate-pulse">
+                        Anggaran Kurang ({formatCompactRupiah(reviewContext.selisihUtama)})
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black tracking-tight">
+                    Review Program Bulan {reviewContext.monthName}{' '}
+                    {selectedYear !== 'all' ? selectedYear : '(2026 & 2027)'}
+                  </h3>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-start md:self-auto">
+                <div className="px-3 py-1.5 rounded-xl bg-white/10 border border-white/15 text-xs font-bold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-400" />
+                  <span>
+                    <strong className="text-amber-300">{reviewContext.flaggedCount}</strong> dari{' '}
+                    <strong>{reviewContext.totalPrograms}</strong> Program Ditujukan Revisi
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* RINGKASAN ANGGARAN BULAN YANG SEDANG DI-REVIEW */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-slate-800">
+              <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                  {reviewContext.isPseView ? 'Rencana Masuk PSE' : 'Dana Siap Pakai Proker'}
+                </span>
+                <span className="text-base font-black text-emerald-300">
+                  {formatRupiah(reviewContext.totalDanaSiapPakai)}
+                </span>
+                {!reviewContext.isPseView && (
+                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                    Total Penerimaan: {formatRupiah(reviewContext.totalPenerimaanTotal)}
+                  </span>
+                )}
+              </div>
+
+              <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                  Kebutuhan Program Bulan {reviewContext.monthName}
+                </span>
+                <span className="text-base font-black text-indigo-300">
+                  {formatRupiah(reviewContext.totalKebutuhan)}
+                </span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  {reviewContext.totalPrograms} kegiatan dijadwalkan berjalan
+                </span>
+              </div>
+
+              <div
+                className={`rounded-xl p-3 border ${
+                  reviewContext.selisihUtama >= 0
+                    ? 'bg-emerald-950/60 border-emerald-500/40'
+                    : 'bg-rose-950/70 border-rose-500/50'
+                }`}
+              >
+                <span className="text-[10px] font-bold uppercase text-slate-300 block">
+                  {reviewContext.selisihUtama >= 0 ? 'Status Kas: Surplus' : 'Status Kas: Kekurangan / Defisit'}
+                </span>
+                <span
+                  className={`text-base font-black ${
+                    reviewContext.selisihUtama >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                  }`}
+                >
+                  {reviewContext.selisihUtama >= 0 ? '+' : ''}
+                  {formatRupiah(reviewContext.selisihUtama)}
+                </span>
+                <span className="text-[10px] text-slate-300 block mt-0.5">
+                  {reviewContext.selisihUtama < 0
+                    ? 'Tandai program di bawah untuk direvisi Seksi'
+                    : 'Anggaran bulan ini tercukupi oleh rencana kas'}
+                </span>
+              </div>
+
+              <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col justify-between">
+                <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                  Pindah Review Bulan Lain
+                </span>
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {(reviewContext.isPseView ? pseMonthlyData.months : monthlyData.months).map((m) => {
+                    const mSelisih =
+                      'selisih' in m ? m.selisih : m.selisihProker < 0 ? m.selisihProker : m.selisihProyeksi;
+                    const mTotal = 'totalAnggaran' in m ? m.totalAnggaran : m.totalDana;
+                    const isDef = mTotal > 0 && mSelisih < 0;
+                    const isCurr = m.monthNum === reviewContext.monthNum;
+                    return (
+                      <button
+                        key={m.monthNum}
+                        type="button"
+                        onClick={() => openReviewMonth(m.monthNum)}
+                        className={`px-1.5 py-0.5 rounded text-[9.5px] font-black transition-all cursor-pointer ${
+                          isCurr
+                            ? 'bg-white text-slate-900 ring-2 ring-amber-400'
+                            : isDef
+                            ? 'bg-rose-500/80 hover:bg-rose-500 text-white'
+                            : 'bg-white/10 hover:bg-white/20 text-slate-300'
+                        }`}
+                        title={
+                          isDef
+                            ? `${m.monthName}: Anggaran Kurang (${formatRupiah(mSelisih)})`
+                            : `${m.monthName}`
+                        }
+                      >
+                        {m.singkatan}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* FEEDBACK SIMPAN CATATAN REVISI */}
+          {revisionSavedFeedback && (
+            <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center justify-between gap-3 shadow-xs animate-in fade-in">
+              <div className="flex items-center gap-2 text-xs font-bold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{revisionSavedFeedback.message}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRevisionSavedFeedback(null)}
+                className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-700 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* TOOLBAR FILTER & PENCARIAN REVIEW */}
+          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
+              <div className="relative flex-1 min-w-[200px] max-w-xs">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={reviewSearch}
+                  onChange={(e) => setReviewSearch(e.target.value)}
+                  placeholder="Cari nama program, PJ, atau tujuan..."
+                  className="w-full h-9 pl-8 pr-3 rounded-xl border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 focus:outline-none focus:bg-white focus:border-indigo-400"
+                />
+              </div>
+
+              <select
+                value={reviewSeksiFilter}
+                onChange={(e) => setReviewSeksiFilter(e.target.value)}
+                className="h-9 px-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
+              >
+                <option value="all">Semua Seksi ({reviewContext.seksiOptions.length})</option>
+                {reviewContext.seksiOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-[11px] font-bold">
+                {(
+                  [
+                    { id: 'all', label: 'Semua' },
+                    { id: 'perlu_revisi', label: `Perlu Revisi (${reviewContext.flaggedCount})` },
+                    { id: 'belum_catatan', label: 'Belum Catatan' },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setReviewStatusFilter(opt.id)}
+                    className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                      reviewStatusFilter === opt.id
+                        ? opt.id === 'perlu_revisi'
+                          ? 'bg-rose-600 text-white shadow-2xs'
+                          : 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              <span>Urutkan:</span>
+              <select
+                value={reviewSortBy}
+                onChange={(e) => setReviewSortBy(e.target.value as 'anggaran_desc' | 'seksi')}
+                className="h-9 px-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
+              >
+                <option value="anggaran_desc">Alokasi Anggaran Terbesar</option>
+                <option value="seksi">Per Seksi / Bidang</option>
+              </select>
+            </div>
+          </div>
+
+          {/* DAFTAR DETAIL PROGRAM BULAN TERPILIH */}
+          {reviewContext.filteredItems.length === 0 ? (
+            <div className="bg-white rounded-2xl p-10 border border-dashed border-slate-300 text-center space-y-3">
+              <ClipboardList className="w-10 h-10 text-slate-300 mx-auto" />
+              <div>
+                <h4 className="text-sm font-black text-slate-800">
+                  Tidak ada program pada filter review ini
+                </h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  Coba reset kata kunci pencarian atau pilih bulan lain pada daftar bulan di atas.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {reviewContext.filteredItems.map(({ program, alokasiDanaBulanIni }, idx) => {
+                const katInfo = getKategoriProgramInfo(program.kategoriProgram);
+                const statusInfo = getStatusInfo(program.status);
+                const revisi = program.catatanRevisiAnggaran;
+                const isFlagged = Boolean(revisi?.perluRevisi);
+                const isResolved = !isFlagged && revisi?.statusTindakLanjut === 'sudah_direvisi';
+                const isFormOpen = activeRevisionFormId === program.id;
+                const porsiPersen =
+                  reviewContext.totalKebutuhan > 0
+                    ? Math.round((alokasiDanaBulanIni / reviewContext.totalKebutuhan) * 100)
+                    : 0;
+                const bulanPelaksanaanText =
+                  program.bulanPelaksanaan && program.bulanPelaksanaan.length > 0
+                    ? program.bulanPelaksanaan.map((b) => BULAN_LIST[b - 1]?.singkatan).join(', ')
+                    : program.tipeJadwal === 'akan_ditentukan'
+                    ? 'Akan Ditentukan Kemudian'
+                    : '-';
+                const noteBulanIni = program.catatanBulanan?.[reviewContext.monthNum];
+
+                return (
+                  <div
+                    key={program.id}
+                    className={`bg-white rounded-2xl border p-4 sm:p-5 shadow-2xs space-y-4 transition-all ${
+                      isFlagged
+                        ? 'border-rose-300 ring-1 ring-rose-200 bg-rose-50/15'
+                        : 'border-slate-200 hover:border-indigo-200'
+                    }`}
+                  >
+                    {/* HEADER KARTU PROGRAM */}
+                    <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3 pb-3 border-b border-slate-100">
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-slate-900 text-white">
+                            #{idx + 1}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-100 text-indigo-900">
+                            Tahun {program.tahun}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-slate-100 text-slate-800">
+                            {program.penanggungjawab?.divisi || 'Seksi'}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border inline-flex items-center gap-1 ${katInfo.badge}`}
+                          >
+                            <span>{katInfo.iconEmoji}</span>
+                            <span>{katInfo.label}</span>
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${statusInfo.color}`}>
+                            {statusInfo.label}
+                          </span>
+
+                          {isFlagged && (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white inline-flex items-center gap-1 shadow-2xs">
+                              <AlertTriangle className="w-3 h-3" />
+                              <span>DITUJUKAN UNTUK REVISI</span>
+                            </span>
+                          )}
+                          {isResolved && (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Sudah Direvisi Seksi</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <h4 className="text-sm sm:text-base font-black text-slate-900">
+                          {program.namaProgram}
+                        </h4>
+                      </div>
+
+                      {/* ANGKA ANGGARAN HIGHLIGHT */}
+                      <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 shrink-0">
+                        <div className="px-3 py-2 rounded-xl bg-indigo-50 border border-indigo-200 text-right">
+                          <span className="text-[9.5px] font-bold uppercase text-indigo-700 block">
+                            Alokasi Bulan {reviewContext.monthName} ({porsiPersen}%)
+                          </span>
+                          <span className="text-sm sm:text-base font-black text-indigo-900">
+                            {formatRupiah(alokasiDanaBulanIni)}
+                          </span>
+                        </div>
+                        <div className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-right">
+                          <span className="text-[9.5px] font-bold uppercase text-slate-500 block">
+                            Total Pagu Tahunan
+                          </span>
+                          <span className="text-sm font-black text-slate-800">
+                            {formatRupiah(program.estimasiAnggaran)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* DETAIL LENGKAP PROGRAM */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          Tujuan Pastoral
+                        </span>
+                        <p className="text-slate-800 font-medium leading-relaxed">
+                          {program.tujuanKegiatan || 'Belum diisi'}
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          Target Sasaran / Output
+                        </span>
+                        <p className="text-slate-800 font-medium leading-relaxed">
+                          {program.targetSasaran || 'Belum diisi'}
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          Penanggung Jawab &amp; Jadwal
+                        </span>
+                        <p className="text-slate-800 font-semibold">
+                          👤 {program.penanggungjawab?.nama || '-'}
+                          {program.penanggungjawab?.kontak ? ` · 📞 ${program.penanggungjawab.kontak}` : ''}
+                        </p>
+                        <p className="text-[11px] text-slate-600">
+                          📅 Bulan aktif: <strong>{bulanPelaksanaanText}</strong>
+                          {program.tanggalSpesifik ? ` (${program.tanggalSpesifik})` : ''}
+                        </p>
+                        {noteBulanIni && (
+                          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-0.5 font-medium">
+                            📝 Catatan Bln Ini: {noteBulanIni}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* CATATAN REVISI AKTIF (JIKA SUDAH ADA) */}
+                    {isFlagged && revisi && (
+                      <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-xs space-y-1.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-black text-rose-900 flex items-center gap-1.5">
+                            <MessageSquare className="w-4 h-4 text-rose-600" />
+                            <span>
+                              Catatan Revisi Ditujukan Kepada: {revisi.ditujukanKepada || program.penanggungjawab?.divisi}
+                            </span>
+                          </span>
+                          <span className="text-[10.5px] font-bold text-rose-700">
+                            Oleh: {revisi.dibuatOleh || 'Admin / Bendahara'}
+                            {revisi.tanggalCatatan
+                              ? ` · ${formatIndonesianDate(revisi.tanggalCatatan, true)}`
+                              : ''}
+                          </span>
+                        </div>
+                        <p className="text-rose-950 font-semibold whitespace-pre-line leading-relaxed">
+                          {revisi.catatan}
+                        </p>
+                        {revisi.rekomendasiAnggaran && revisi.rekomendasiAnggaran > 0 && (
+                          <p className="text-[11px] font-black text-amber-900 bg-amber-100/80 border border-amber-300 inline-block px-2.5 py-0.5 rounded-lg">
+                            💡 Rekomendasi Pagu Anggaran Baru: {formatRupiah(revisi.rekomendasiAnggaran)}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* FORM INLINE BUAT CATATAN & TUJUKAN UNTUK REVISI */}
+                    {isFormOpen ? (
+                      <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-300 space-y-3 animate-in fade-in duration-150">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs font-black text-amber-950">
+                            <MessageSquare className="w-4 h-4 text-amber-700" />
+                            <span>
+                              Buat Catatan &amp; Tujukan Untuk Revisi →{' '}
+                              <span className="text-rose-700">
+                                {program.penanggungjawab?.divisi || 'Seksi'} (PJ:{' '}
+                                {program.penanggungjawab?.nama || '-'})
+                              </span>
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setActiveRevisionFormId(null)}
+                            className="text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                          >
+                            Tutup Form
+                          </button>
+                        </div>
+
+                        {/* TEMPLATE CEPAT CATATAN REVISI */}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-amber-900 uppercase">Template Cepat:</span>
+                          {[
+                            'Mohon efisiensi pagu anggaran / kurangi biaya operasional karena kas bulan ini defisit.',
+                            'Mohon geser jadwal pelaksanaan ke bulan lain yang kondisi kasnya surplus.',
+                            'Mohon pecah pencairan bertahap atau sesuaikan jumlah peserta/target.',
+                            'Mohon lengkapi dukungan swadaya umat / donatur mandiri sebagian.',
+                          ].map((tpl, tIdx) => (
+                            <button
+                              key={tIdx}
+                              type="button"
+                              onClick={() =>
+                                setRevisionNoteDraft((prev) => (prev ? `${prev}\n${tpl}` : tpl))
+                              }
+                              className="px-2 py-1 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-[10.5px] font-bold text-amber-950 transition-colors cursor-pointer"
+                            >
+                              + {tpl.slice(0, 42)}...
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div className="md:col-span-2 space-y-1">
+                            <label className="text-[11px] font-bold text-slate-700 block">
+                              Catatan / Arahan Revisi untuk Seksi &amp; Penanggung Jawab <span className="text-rose-600">*</span>
+                            </label>
+                            <textarea
+                              rows={3}
+                              value={revisionNoteDraft}
+                              onChange={(e) => setRevisionNoteDraft(e.target.value)}
+                              placeholder="Tuliskan poin revisi yang jelas (misal: rincian komponen yang perlu disesuaikan, pengalihan bulan, atau target efisiensi anggaran)..."
+                              className="w-full p-2.5 rounded-xl border border-amber-300 bg-white text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-700 block">
+                              Rekomendasi Pagu Anggaran (Opsional)
+                            </label>
+                            <input
+                              type="text"
+                              value={revisionBudgetDraft}
+                              onChange={(e) => setRevisionBudgetDraft(e.target.value.replace(/[^\d]/g, ''))}
+                              placeholder="Contoh: 5000000"
+                              className="w-full h-10 px-3 rounded-xl border border-amber-300 bg-white text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            />
+                            {revisionBudgetDraft && (
+                              <span className="text-[11px] font-bold text-emerald-700 block">
+                                Preview: {formatRupiah(parseInt(revisionBudgetDraft, 10) || 0)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                          <span className="text-[10.5px] text-amber-900 font-medium">
+                            Catatan ini akan muncul sebagai peringatan revisi saat Seksi membuka program ini.
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setActiveRevisionFormId(null)}
+                              className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-xs font-bold text-slate-700 cursor-pointer"
+                            >
+                              Batal
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!revisionNoteDraft.trim() || !onSaveProgram}
+                              onClick={() => handleSaveRevisionNote(program, reviewContext.monthNum)}
+                              className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                              <span>Simpan &amp; Tujukan Untuk Revisi</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* BARIS AKSI PROGRAM DI MODE REVIEW */
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openRevisionForm(program)}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer ${
+                              isFlagged
+                                ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                                : 'bg-rose-600 hover:bg-rose-700 text-white'
+                            }`}
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>
+                              {isFlagged
+                                ? 'Edit Catatan Revisi'
+                                : 'Buat Catatan & Tujukan Untuk Revisi'}
+                            </span>
+                          </button>
+
+                          {isFlagged && onSaveProgram && (
+                            <button
+                              type="button"
+                              onClick={() => handleResolveOrClearRevision(program, 'resolved')}
+                              className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Tandai Sudah Direvisi</span>
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setProgramToEditByAdmin(program)}
+                            className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+                            title="Sesuaikan Anggaran atau Jadwal Bulan Program Secara Langsung"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Edit Jadwal / Anggaran</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => onOpenProgramDetail(program.id)}
+                            className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                          >
+                            <span>Formulir Lengkap</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* BOTTOM STICKY/FOOTER BAR KEMBALI KE DASHBOARD */}
+          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="text-xs text-slate-600 font-medium">
+              Selesai meninjau program di bulan <strong>{reviewContext.monthName}</strong>?
+              {reviewContext.flaggedCount > 0 && (
+                <span className="ml-1 text-rose-700 font-bold">
+                  ({reviewContext.flaggedCount} program telah ditujukan untuk revisi)
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={closeReviewMonth}
+              className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4 text-emerald-400" />
+              <span>Kembali ke Dashboard Penggunaan Dana &amp; Penerimaan</span>
+            </button>
+          </div>
+        </div>
+      ) : focusMode === 'pse_khusus' ? (
         /* ======================================================== */
         /* MODUL KHUSUS SEKSI PSE (PENGEMBANGAN SOSIAL EKONOMI) */
         /* TERPISAH DARI UANG KOLEKTE UMUM & LITURGI */
@@ -973,6 +1797,38 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
             </div>
           </div>
 
+          {/* PANEL PERINGATAN BULAN ANGGARAN PSE KURANG */}
+          {pseDeficitMonths.length > 0 && (
+            <div className="bg-rose-50/90 border border-rose-300 rounded-2xl p-4 shadow-2xs space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <h3 className="text-xs sm:text-sm font-black text-rose-950">
+                    Deteksi Bulan Anggaran PSE Kurang ({pseDeficitMonths.length} Bulan Defisit)
+                  </h3>
+                </div>
+                <span className="text-[11px] font-bold text-rose-800">
+                  Klik bulan di bawah untuk review detail program &amp; beri catatan revisi
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {pseDeficitMonths.map((m) => (
+                  <button
+                    key={m.monthNum}
+                    type="button"
+                    onClick={() => openReviewMonth(m.monthNum)}
+                    className="px-3 py-1.5 rounded-xl bg-white hover:bg-rose-100 border border-rose-300 text-xs font-black text-rose-900 flex items-center gap-2 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <span>{m.monthName}: {formatCompactRupiah(m.selisih)}</span>
+                    <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px]">
+                      Review ({m.programs.length} Proker)
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* GRAFIK 12 BULAN KHUSUS SEKSI PSE (TERPISAH DARI KOLEKTE) */}
           <div className="bg-white rounded-2xl p-5 border border-amber-200 shadow-2xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1095,30 +1951,45 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
                 </p>
               </div>
 
-              <div
-                className={`px-3 py-1.5 rounded-xl border font-black text-xs flex items-center gap-2 ${
-                  currentPseMonthData.selisih >= 0
-                    ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                    : 'bg-rose-50 text-rose-900 border-rose-300'
-                }`}
-              >
-                {currentPseMonthData.selisih >= 0 ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>
-                      Surplus Kasih:{' '}
-                      <strong className="text-emerald-800">+{formatRupiah(currentPseMonthData.selisih)}</strong>
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                    <span>
-                      Defisit Kasih:{' '}
-                      <strong className="text-rose-800">{formatRupiah(currentPseMonthData.selisih)}</strong>
-                    </span>
-                  </>
-                )}
+              <div className="flex flex-wrap items-center gap-2">
+                <div
+                  className={`px-3 py-1.5 rounded-xl border font-black text-xs flex items-center gap-2 ${
+                    currentPseMonthData.selisih >= 0
+                      ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                      : 'bg-rose-50 text-rose-900 border-rose-300'
+                  }`}
+                >
+                  {currentPseMonthData.selisih >= 0 ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>
+                        Surplus Kasih:{' '}
+                        <strong className="text-emerald-800">+{formatRupiah(currentPseMonthData.selisih)}</strong>
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>
+                        Defisit Kasih:{' '}
+                        <strong className="text-rose-800">{formatRupiah(currentPseMonthData.selisih)}</strong>
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => openReviewMonth(currentPseMonthData.monthNum)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer ${
+                    currentPseMonthData.selisih < 0
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                      : 'bg-amber-600 hover:bg-amber-700 text-white'
+                  }`}
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Review Detail &amp; Revisi</span>
+                </button>
               </div>
             </div>
 
@@ -1436,17 +2307,33 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
                           </span>
                         </td>
                         <td className="py-2.5 px-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setActiveMonth(m.monthNum)}
-                            className={`px-2.5 py-1 rounded-lg text-[10.5px] font-bold transition-colors cursor-pointer ${
-                              isSelected
-                                ? 'bg-amber-600 text-white'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                            }`}
-                          >
-                            {isSelected ? 'Aktif' : 'Cek Bulan'}
-                          </button>
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setActiveMonth(m.monthNum)}
+                              className={`px-2 py-1 rounded-lg text-[10.5px] font-bold transition-colors cursor-pointer ${
+                                isSelected
+                                  ? 'bg-amber-600 text-white'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                              }`}
+                            >
+                              {isSelected ? 'Aktif' : 'Cek'}
+                            </button>
+                            {m.programs.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => openReviewMonth(m.monthNum)}
+                                className={`px-2 py-1 rounded-lg text-[10.5px] font-black transition-colors cursor-pointer ${
+                                  !isSurplus
+                                    ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                                    : 'bg-amber-100 hover:bg-amber-200 text-amber-900'
+                                }`}
+                                title={`Review Detail Program Bulan ${m.monthName}`}
+                              >
+                                Review
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1611,6 +2498,91 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
         </div>
       </div>
 
+      {/* PANEL DETEKSI & REVIEW CEPAT BULAN ANGGARAN KURANG (DEFISIT) */}
+      {(deficitMonths.length > 0 || totalRevisionFlagged > 0) && (
+        <div
+          className={`rounded-2xl p-4 border shadow-2xs space-y-3 ${
+            deficitMonths.length > 0
+              ? 'bg-gradient-to-r from-rose-50 via-amber-50/70 to-rose-50 border-rose-300'
+              : 'bg-amber-50/70 border-amber-300'
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-start sm:items-center gap-2.5">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
+                  deficitMonths.length > 0 ? 'bg-rose-600 text-white' : 'bg-amber-600 text-white'
+                }`}
+              >
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-xs sm:text-sm font-black text-slate-900">
+                  {deficitMonths.length > 0
+                    ? `Terdeteksi ${deficitMonths.length} Bulan dengan Anggaran Kurang (Defisit)`
+                    : 'Monitoring Catatan Revisi Program Kerja'}
+                </h3>
+                <p className="text-[11px] text-slate-700 font-medium">
+                  {deficitMonths.length > 0
+                    ? 'Klik langsung bulan yang defisit untuk memeriksa program yang berjalan secara detail dan menujukan catatan revisi kepada Seksi.'
+                    : 'Terdapat program kerja yang sedang ditujukan untuk revisi anggaran oleh peninjau.'}
+                </p>
+              </div>
+            </div>
+
+            {totalRevisionFlagged > 0 && (
+              <span className="px-3 py-1 rounded-full bg-white border border-rose-300 text-[11px] font-black text-rose-800 self-start sm:self-auto shrink-0">
+                ⚠️ {totalRevisionFlagged} Program Ditujukan Revisi
+              </span>
+            )}
+          </div>
+
+          {deficitMonths.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {deficitMonths.map((m) => {
+                const shortfall = m.selisihProker < 0 ? m.selisihProker : m.selisihProyeksi;
+                const flaggedInMonth = m.items.filter((i) => i.program.catatanRevisiAnggaran?.perluRevisi).length;
+                return (
+                  <div
+                    key={m.monthNum}
+                    className="bg-white rounded-xl p-3 border border-rose-200 shadow-2xs flex items-center justify-between gap-2.5 hover:border-rose-400 transition-colors"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-black text-slate-900">{m.monthName}</span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-slate-100 text-slate-700">
+                          {m.count} Proker
+                        </span>
+                        {flaggedInMonth > 0 && (
+                          <span className="text-[9.5px] font-black px-1.5 py-0.2 rounded bg-amber-100 text-amber-900">
+                            {flaggedInMonth} Revisi
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] font-black text-rose-600 mt-0.5">
+                        Kurang {formatRupiah(Math.abs(shortfall))}
+                      </p>
+                      <p className="text-[10px] text-slate-500 truncate">
+                        Beban {formatCompactRupiah(m.totalDana)} vs Kas Proker {formatCompactRupiah(m.danaBisaDipakaiProker)}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => openReviewMonth(m.monthNum)}
+                      className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-black flex items-center gap-1 shadow-2xs shrink-0 cursor-pointer transition-colors"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Review Program</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 3. INTERACTIVE 12-MONTH DUAL CHART (KOMPARASI PENERIMAAN VS ANGGARAN) */}
       <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1751,31 +2723,47 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
             </p>
           </div>
 
-          {/* Banner Status Likuiditas Bulan Terpilih */}
-          <div
-            className={`px-3.5 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-bold ${
-              currentMonthData.selisihProyeksi >= 0
-                ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                : 'bg-rose-50 text-rose-900 border-rose-300'
-            }`}
-          >
-            {currentMonthData.selisihProyeksi >= 0 ? (
-              <>
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>
-                  Surplus Proyeksi:{' '}
-                  <strong className="text-emerald-800">+{formatRupiah(currentMonthData.selisihProyeksi)}</strong>
-                </span>
-              </>
-            ) : (
-              <>
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>
-                  Defisit Proyeksi:{' '}
-                  <strong className="text-rose-800">{formatRupiah(currentMonthData.selisihProyeksi)}</strong>
-                </span>
-              </>
-            )}
+          {/* Banner Status Likuiditas Bulan Terpilih + Tombol Review Detail Program */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              className={`px-3.5 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-bold ${
+                currentMonthData.selisihProyeksi >= 0
+                  ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                  : 'bg-rose-50 text-rose-900 border-rose-300'
+              }`}
+            >
+              {currentMonthData.selisihProyeksi >= 0 ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    Surplus Proyeksi:{' '}
+                    <strong className="text-emerald-800">+{formatRupiah(currentMonthData.selisihProyeksi)}</strong>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>
+                    Defisit Proyeksi:{' '}
+                    <strong className="text-rose-800">{formatRupiah(currentMonthData.selisihProyeksi)}</strong>
+                  </span>
+                </>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => openReviewMonth(currentMonthData.monthNum)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer ${
+                currentMonthData.selisihProyeksi < 0 || currentMonthData.selisihProker < 0
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+              }`}
+              title={`Review secara detail seluruh program yang berjalan pada bulan ${currentMonthData.monthName} & beri catatan revisi`}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Review Program Bulan Ini ({currentMonthData.count})</span>
+            </button>
           </div>
         </div>
 
@@ -2419,6 +3407,11 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
                                       <span>{katInfo.iconEmoji}</span>
                                       <span>{katInfo.label}</span>
                                     </span>
+                                    {program.catatanRevisiAnggaran?.perluRevisi && (
+                                      <span className="text-[9.5px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white inline-flex items-center gap-1">
+                                        ⚠️ Perlu Revisi
+                                      </span>
+                                    )}
                                     <h6 className="text-xs font-bold text-slate-900 group-hover:text-indigo-900 truncate">
                                       {program.namaProgram}
                                     </h6>
@@ -2428,6 +3421,13 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
                                     PJ: <strong className="text-slate-700">{program.penanggungjawab?.nama || '-'}</strong>
                                     {program.tanggalSpesifik ? ` · ${program.tanggalSpesifik}` : ''}
                                   </p>
+
+                                  {program.catatanRevisiAnggaran?.perluRevisi && program.catatanRevisiAnggaran.catatan && (
+                                    <div className="mt-1.5 text-[10px] px-2 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-800 font-semibold">
+                                      <span className="font-black">⚠️ Catatan Revisi: </span>
+                                      <span>{program.catatanRevisiAnggaran.catatan}</span>
+                                    </div>
+                                  )}
 
                                   {noteBln && (
                                     <div className="mt-1.5 text-[10px] px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 font-medium inline-flex items-center gap-1">
@@ -2578,15 +3578,31 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
                       </span>
                     </td>
                     <td className="py-2.5 px-3 text-center">
-                      <button
-                        type="button"
-                        onClick={() => setActiveMonth(m.monthNum)}
-                        className={`px-2.5 py-1 rounded-lg text-[10.5px] font-bold transition-colors cursor-pointer ${
-                          isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                        }`}
-                      >
-                        {isSelected ? 'Aktif' : 'Cek Bulan'}
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setActiveMonth(m.monthNum)}
+                          className={`px-2 py-1 rounded-lg text-[10.5px] font-bold transition-colors cursor-pointer ${
+                            isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          {isSelected ? 'Aktif' : 'Cek'}
+                        </button>
+                        {m.count > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => openReviewMonth(m.monthNum)}
+                            className={`px-2 py-1 rounded-lg text-[10.5px] font-black transition-colors cursor-pointer ${
+                              (!isSurplus || m.selisihProker < 0)
+                                ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200'
+                            }`}
+                            title={`Review Detail Program Bulan ${m.monthName}`}
+                          >
+                            Review
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -2669,7 +3685,7 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
                 className="inline-flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
               >
                 <ArrowLeft className="w-4 h-4 text-emerald-400" />
-                <span>← Kembali ke Tabel Rencana &amp; Program</span>
+                <span>← Kembali ke Dashboard Penggunaan Dana &amp; Penerimaan</span>
               </button>
 
               <button
@@ -2739,7 +3755,12 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
                   <span>Jadwal Pelaksanaan:</span>
                 </span>
                 <p className="text-xs font-semibold text-slate-800">
-                  Bulan Pelaksanaan: {selectedDetailProgram.bulanPelaksanaan?.map((b) => BULAN_LIST[b - 1]?.nama).join(', ') || '-'}
+                  Bulan Pelaksanaan:{' '}
+                  {selectedDetailProgram.bulanPelaksanaan && selectedDetailProgram.bulanPelaksanaan.length > 0
+                    ? selectedDetailProgram.bulanPelaksanaan.map((b) => BULAN_LIST[b - 1]?.nama).join(', ')
+                    : selectedDetailProgram.tipeJadwal === 'akan_ditentukan'
+                    ? 'Akan Ditentukan Kemudian'
+                    : '-'}
                 </p>
                 {selectedDetailProgram.tanggalSpesifik && (
                   <p className="text-[11px] text-slate-600">
@@ -2797,6 +3818,24 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
                 </div>
               </div>
 
+              {/* Catatan Revisi Anggaran jika ada */}
+              {selectedDetailProgram.catatanRevisiAnggaran?.perluRevisi && (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl space-y-1">
+                  <span className="text-[10.5px] font-black text-rose-900 uppercase block flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Catatan Revisi Anggaran ({selectedDetailProgram.catatanRevisiAnggaran.ditujukanKepada || 'Seksi'}):</span>
+                  </span>
+                  <p className="text-rose-950 font-semibold whitespace-pre-line">
+                    {selectedDetailProgram.catatanRevisiAnggaran.catatan}
+                  </p>
+                  {selectedDetailProgram.catatanRevisiAnggaran.rekomendasiAnggaran && (
+                    <p className="text-[11px] font-black text-amber-900">
+                      Rekomendasi Pagu: {formatRupiah(selectedDetailProgram.catatanRevisiAnggaran.rekomendasiAnggaran)}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Solusi / Tindak Lanjut Kendala jika ada */}
               {selectedDetailProgram.tindakLanjutKendala && (
                 <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl space-y-1">
@@ -2808,7 +3847,7 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
               )}
             </div>
 
-            {/* FOOTER ACTIONS DENGAN MENU BACK & EDIT/JADWALKAN ULANG */}
+            {/* FOOTER ACTIONS DENGAN MENU BACK & EDIT/REVISI */}
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
               <button
                 type="button"
@@ -2816,10 +3855,26 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
                 className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>← Kembali ke Tabel Rencana &amp; Program</span>
+                <span>← Kembali ke Dashboard Penggunaan Dana &amp; Penerimaan</span>
               </button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const prog = selectedDetailProgram;
+                    const targetM = prog.bulanPelaksanaan?.includes(activeMonth)
+                      ? activeMonth
+                      : prog.bulanPelaksanaan?.[0] || activeMonth;
+                    setSelectedDetailProgram(null);
+                    openReviewMonth(targetM, prog);
+                  }}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Tujukan Untuk Revisi</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -2827,9 +3882,9 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
                     setSelectedDetailProgram(null);
                     setProgramToEditByAdmin(prog);
                   }}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                 >
-                  <span>✏️ Edit &amp; Jadwalkan Ulang Program</span>
+                  <span>✏️ Edit &amp; Jadwalkan Ulang</span>
                 </button>
 
                 <button
@@ -2880,21 +3935,53 @@ export const MonthlyCashFlowProjectionView: React.FC<MonthlyCashFlowProjectionVi
           defaultMonth={activeMonth}
           onSaveEvaluasi={(programId, evaluasiData, targetBulan) => {
             const prog = programs.find((p) => p.id === programId);
+            let savedUpdatedProg: ProgramKerja | undefined;
             if (prog && onSaveProgram) {
               const monthKey = String(targetBulan || activeMonth);
               const updatedEvaluasiBulanan = {
                 ...(prog.evaluasiBulanan || {}),
                 [monthKey]: evaluasiData,
               };
+              const isBerulang =
+                prog.tipeJadwal === 'sepanjang_tahun' ||
+                prog.tipeJadwal === 'multi_bulan' ||
+                isProgramBerulang(prog) ||
+                (Array.isArray(prog.bulanPelaksanaan) && prog.bulanPelaksanaan.length > 1);
+              let masterEvaluasi = evaluasiData;
+              if (isBerulang) {
+                const summary = getProgramExecutionSummary({
+                  ...prog,
+                  evaluasi: evaluasiData,
+                  evaluasiBulanan: updatedEvaluasiBulanan,
+                });
+                masterEvaluasi = {
+                  ...evaluasiData,
+                  statusKeterlaksanaan:
+                    summary.overallStatus === 'terlaksana_penuh'
+                      ? 'terlaksana'
+                      : summary.overallStatus === 'terlaksana_sebagian'
+                      ? 'terlaksana_sebagian'
+                      : summary.overallStatus === 'tidak_terlaksana'
+                      ? 'tidak_terlaksana'
+                      : summary.overallStatus === 'perubahan_waktu'
+                      ? 'perubahan_waktu'
+                      : 'belum_terlaksana',
+                  alasanTidakTerlaksana: summary.catatanBulanTidakTerlaksana || undefined,
+                  rincianTidakTerlaksana:
+                    summary.rincianTidakTerlaksana.length > 0 ? summary.rincianTidakTerlaksana : undefined,
+                };
+              }
               const updatedProg: ProgramKerja = {
                 ...prog,
+                evaluasi: masterEvaluasi,
                 evaluasiBulanan: updatedEvaluasiBulanan,
-                status: evaluasiData.statusKeterlaksanaan === 'terlaksana' ? 'selesai' : prog.status,
+                status: !isBerulang && evaluasiData.statusKeterlaksanaan === 'terlaksana' ? 'selesai' : prog.status,
               };
+              savedUpdatedProg = updatedProg;
               onSaveProgram(updatedProg);
             }
-            if (onOpenEvaluasi && prog) {
-              onOpenEvaluasi(prog, targetBulan || activeMonth);
+            if (onOpenEvaluasi && (savedUpdatedProg || prog)) {
+              onOpenEvaluasi(savedUpdatedProg || prog!, targetBulan || activeMonth);
             }
             setIsPseDisbursementOpen(false);
             setSelectedPseDisbursementProgram(null);

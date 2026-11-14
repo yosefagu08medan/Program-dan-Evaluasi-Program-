@@ -30,6 +30,9 @@ export interface PenerimaanMingguan {
   namaHariKhusus?: string; // Nama hari perayaan khusus (misal: "Kamis Putih", "Jumat Agung", "Malam Paskah", dll.)
   keterangan?: string; // Catatan teknis misa / kwitansi / jumlah amplop
   pencatat?: string; // Nama petugas / bendahara yang menginput (Default: Bendahara Paroki)
+  isRealisasiManual?: boolean; // True jika realisasi sudah diinput secara manual oleh user
+  isTargetTahunan?: boolean; // True jika target adalah target tahunan sepanjang tahun (bukan bulanan), misal Dana Solidaritas Umat PSE
+  targetTahunan?: number; // Target tahunan penuh (Rp/tahun). Realisasi di bulan apa pun akan mengurangi target tahunan ini
   createdAt: string;
   updatedAt: string;
 }
@@ -249,4 +252,91 @@ export function removePseCustomPenerimaanOption(optionToRemove: string): string[
     console.warn('Error deleting PSE custom penerimaan option:', e);
   }
   return [...DEFAULT_PSE_PENERIMAAN_OPTIONS, ...updated];
+}
+
+export interface PseAnnualTargetSummary {
+  namaPenerimaan: string;
+  targetTahunan: number;
+  totalRealisasiTahunan: number;
+  sisaTargetTahunan: number;
+  persentaseTahunan: number;
+  isSurplus: boolean;
+  selisihSurplus: number;
+  bulananRealisasi: { bulan: number; namaBulan: string; realisasi: number; count: number }[];
+}
+
+export function isPseTargetTahunan(item?: Partial<PenerimaanMingguan> | null): boolean {
+  if (!item) return false;
+  if (item.isTargetTahunan) return true;
+  const isPse = item.alokasiSeksi === 'Seksi PSE' || !item.alokasiSeksi;
+  const namaLower = (item.namaPenerimaan || '').toLowerCase();
+  return Boolean(isPse && (namaLower.includes('solidaritas') || namaLower.includes('dana solidaritas umat')));
+}
+
+export function calculatePseAnnualTargetSummary(
+  penerimaanList: PenerimaanMingguan[],
+  tahun: 2026 | 2027 | number = 2026,
+  targetNama = 'Dana Solidaritas Umat'
+): PseAnnualTargetSummary {
+  const BULAN_NAMES = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+  ];
+
+  // Ambil semua item PSE untuk targetNama dan tahun yang dipilih
+  const pseItems = penerimaanList.filter((p) => {
+    if (p.tahun !== tahun) return false;
+    const isPse = p.alokasiSeksi === 'Seksi PSE' || (p.namaPenerimaan && p.namaPenerimaan.toLowerCase().includes('pse'));
+    const isMatchingNama =
+      p.namaPenerimaan?.toLowerCase().includes('solidaritas') ||
+      p.namaPenerimaan?.toLowerCase() === targetNama.toLowerCase() ||
+      p.isTargetTahunan;
+    return isPse && isMatchingNama;
+  });
+
+  // Tentukan target tahunan
+  let targetTahunan = 0;
+  for (const item of pseItems) {
+    if (typeof item.targetTahunan === 'number' && item.targetTahunan > 0) {
+      targetTahunan = Math.max(targetTahunan, item.targetTahunan);
+    } else if (typeof item.rancangan === 'number' && item.rancangan > 0) {
+      targetTahunan = Math.max(targetTahunan, item.rancangan);
+    }
+  }
+
+  // Jika belum ada target yang diinput, default ke 50.000.000 / tahun
+  if (targetTahunan === 0) {
+    targetTahunan = 50000000;
+  }
+
+  // Hitung total realisasi tahunan dari seluruh bulan
+  const totalRealisasiTahunan = pseItems.reduce((sum, item) => sum + (item.realisasi || 0), 0);
+  const sisaTargetTahunan = Math.max(0, targetTahunan - totalRealisasiTahunan);
+  const selisihSurplus = Math.max(0, totalRealisasiTahunan - targetTahunan);
+  const isSurplus = totalRealisasiTahunan >= targetTahunan;
+  const persentaseTahunan = targetTahunan > 0 ? Math.round((totalRealisasiTahunan / targetTahunan) * 100) : 0;
+
+  // Breakdown per bulan (1-12)
+  const bulananRealisasi = Array.from({ length: 12 }, (_, i) => {
+    const bNum = i + 1;
+    const bItems = pseItems.filter((p) => p.bulan === bNum);
+    const bReal = bItems.reduce((sum, p) => sum + (p.realisasi || 0), 0);
+    return {
+      bulan: bNum,
+      namaBulan: BULAN_NAMES[i],
+      realisasi: bReal,
+      count: bItems.length,
+    };
+  });
+
+  return {
+    namaPenerimaan: targetNama,
+    targetTahunan,
+    totalRealisasiTahunan,
+    sisaTargetTahunan,
+    persentaseTahunan,
+    isSurplus,
+    selisihSurplus,
+    bulananRealisasi,
+  };
 }

@@ -84,6 +84,7 @@ export const FilterDrawer: React.FC<FilterDrawerProps> = ({
                 { id: 'sepanjang_tahun', label: 'Sepanjang Tahun (12 Bln)' },
                 { id: 'multi_bulan', label: 'Multi Bulan Terjadwal' },
                 { id: 'satu_kali', label: 'Satu Kali Pelaksanaan' },
+                { id: 'akan_ditentukan', label: 'Akan Ditentukan Kemudian' },
               ].map((opt) => {
                 const isSelected = filterOptions.tipeJadwal === opt.id;
                 return (

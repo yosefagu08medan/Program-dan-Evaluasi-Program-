@@ -34,6 +34,8 @@ import {
   Download,
   ArrowRight,
   Wallet,
+  ClipboardCheck,
+  Presentation,
 } from 'lucide-react';
 import { ProgramKerja } from '../types/proker';
 import { AuthSession } from '../types/auth';
@@ -48,10 +50,14 @@ import {
   isDivisionMatch,
   isProgramBerulang,
   getEvaluasiForMonth,
+  getLatestEvaluasi,
   getAnggaranTerpakaiSebelumBulan,
   getSisaBudgetUntukBulan,
   getKategoriProgramInfo,
   getAlokasiBudgetBulanan,
+  getDetailPaguBulanan,
+  getProgramExecutionSummary,
+  hasProgramEvaluasi,
 } from '../utils/formatters';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
 
@@ -65,7 +71,8 @@ interface DashboardViewProps {
   onSelectSeksi: (seksi: string | 'all') => void;
   onOpenProgramDetail: (programId: string) => void;
   onInputProgramForSeksi: (seksiName: string) => void;
-  onOpenEvaluasi: (program: ProgramKerja, targetMonth?: number) => void;
+  onOpenEvaluasi?: (program: ProgramKerja, targetMonth?: number) => void;
+  onNavigateToEvaluasiTab?: () => void;
   onInputProgramLuarRancangan?: (seksiName?: string) => void;
   authSession: AuthSession | null;
   onAuthenticate: (session: AuthSession) => void;
@@ -78,6 +85,8 @@ interface DashboardViewProps {
   onOpenCashFlowTab?: () => void;
   onOpenPenerimaanTab?: () => void;
   onOpenDualPlanningForSeksi?: (seksiName: string) => void;
+  onOpenPresentation?: () => void;
+  onOpenPresentasi2027?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -91,6 +100,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenProgramDetail,
   onInputProgramForSeksi,
   onOpenEvaluasi,
+  onNavigateToEvaluasiTab,
   onInputProgramLuarRancangan,
   authSession,
   onAuthenticate,
@@ -103,6 +113,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenCashFlowTab,
   onOpenPenerimaanTab,
   onOpenDualPlanningForSeksi,
+  onOpenPresentation,
+  onOpenPresentasi2027,
 }) => {
   // Bulan berjalan default (1 - 12) berdasarkan kalender saat ini
   const currentCalendarMonth = new Date().getMonth() + 1;
@@ -128,6 +140,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // State untuk toggle bagian pelayanan rutin di bawah dashboard (default: hide/tertutup)
   const [isBottomRoutineExpanded, setIsBottomRoutineExpanded] = useState<boolean>(false);
+
+  // 2 Mode Tampilan Dashboard:
+  // 1. 'bulan_berjalan': Menampilkan program yang akan & sedang dilaksanakan pada bulan berjalan
+  // 2. 'keseluruhan': Menampilkan program kerja secara keseluruhan
+  const [dashboardViewMode, setDashboardViewMode] = useState<'bulan_berjalan' | 'keseluruhan'>('bulan_berjalan');
 
   const toggleSeksiRoutine = (divisionId: string) => {
     setExpandedSeksiRoutine((prev) => ({
@@ -180,13 +197,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return activeSeksiPrograms.filter((p) => isPelayananRutin(p));
   }, [activeSeksiPrograms]);
 
+  // Program kerja terjadwal pada bulan berjalan (sesuai filter seksi atau seluruh paroki)
+  const scheduledInReminderMonth = useMemo(() => {
+    return programsFilteredBySeksi.filter((p) => {
+      if (isPelayananRutin(p)) return false;
+      return Array.isArray(p.bulanPelaksanaan) && p.bulanPelaksanaan.includes(reminderMonth);
+    });
+  }, [programsFilteredBySeksi, reminderMonth]);
+
+  // Program yang sudah berjalan & sudah dievaluasi pada bulan berjalan
+  const evaluatedInReminderMonth = useMemo(() => {
+    return scheduledInReminderMonth.filter((p) => {
+      const ev = getEvaluasiForMonth(p, reminderMonth);
+      return !!ev?.statusKeterlaksanaan && ev.statusKeterlaksanaan !== 'belum_terlaksana';
+    });
+  }, [scheduledInReminderMonth, reminderMonth]);
+
+  // Program yang akan / sedang dilaksanakan pada bulan berjalan (belum ada catatan evaluasi)
+  const pendingInReminderMonth = useMemo(() => {
+    return scheduledInReminderMonth.filter((p) => {
+      const ev = getEvaluasiForMonth(p, reminderMonth);
+      return !ev?.statusKeterlaksanaan || ev.statusKeterlaksanaan === 'belum_terlaksana';
+    });
+  }, [scheduledInReminderMonth, reminderMonth]);
+
+  // Pelayanan rutin pada bulan berjalan
+  const routineInReminderMonth = useMemo(() => {
+    return programsFilteredBySeksi.filter((p) => isPelayananRutin(p));
+  }, [programsFilteredBySeksi]);
+
   // Hitung jumlah program yang sudah dievaluasi vs belum pada bulan pengingat ini
   const evaluatedCount = useMemo(() => {
     return scheduledForSeksiInMonth.filter((p) => {
-      const ev = getEvaluasiForMonth(p, reminderMonth);
-      return !!ev?.statusKeterlaksanaan;
-    }).length;
-  }, [scheduledForSeksiInMonth, reminderMonth]);
+      return hasProgramEvaluasi(p, reminderMonth);
+    });
+  }, [scheduledForSeksiInMonth, reminderMonth]).length;
 
   const pendingEvaluationCount = scheduledForSeksiInMonth.length - evaluatedCount;
 
@@ -255,9 +300,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return [...scheduledProgramsInMonth, ...routinePrograms];
   }, [scheduledProgramsInMonth, routinePrograms]);
 
-  // Aggregate metrics
+  // Aggregate metrics (Program 2027 yang ditolak DPP tidak dihitung di pagu anggaran final)
   const totalAnggaran = useMemo(() => {
-    return allActiveProgramsInView.reduce((sum, p) => sum + (p.estimasiAnggaran || 0), 0);
+    return allActiveProgramsInView.reduce((sum, p) => {
+      if (p.tahun === 2027 && p.catatanPastorParoki?.statusPersetujuan === 'ditolak') {
+        return sum;
+      }
+      return sum + (p.estimasiAnggaran || 0);
+    }, 0);
   }, [allActiveProgramsInView]);
 
   const totalAnggaranRoutine = useMemo(() => {
@@ -270,12 +320,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       if (p.status in counts) {
         counts[p.status as keyof typeof counts]++;
       }
-      if (p.evaluasi?.statusKeterlaksanaan === 'terlaksana') {
+      if (hasProgramEvaluasi(p, selectedMonth)) {
         counts.sudahDievaluasi++;
       }
     });
     return counts;
-  }, [allActiveProgramsInView]);
+  }, [allActiveProgramsInView, selectedMonth]);
 
   const luarRancanganCount = useMemo(() => {
     return allActiveProgramsInView.filter((p) => !!p.isLuarRancangan).length;
@@ -491,6 +541,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           )}
 
+          {/* Mode Presentasi Rapat (Dewan/Pleno) button */}
+          {onOpenPresentation && (
+            <button
+              type="button"
+              onClick={onOpenPresentation}
+              className="px-3 py-1 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white border border-indigo-400 text-[10.5px] font-black flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+              title="Buka Mode Presentasi Rapat: Tampilan khusus untuk dipresentasikan di proyektor rapat dewan"
+            >
+              <span>📺</span>
+              <span>Mode Presentasi Rapat</span>
+            </button>
+          )}
+
+          {/* Presentasi Program Kerja 2027 button */}
+          {onOpenPresentasi2027 && (
+            <button
+              type="button"
+              onClick={onOpenPresentasi2027}
+              className="px-3 py-1 rounded-lg bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-800 hover:to-teal-800 text-white border border-emerald-500 text-[10.5px] font-black flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+              title="Buka Presentasi Program Kerja Tahun 2027, Anggaran, dan Grafik Keperluan Pendanaan Bulanan"
+            >
+              <Presentation className="w-3.5 h-3.5 text-emerald-200" />
+              <span>Presentasi Proker 2027</span>
+            </button>
+          )}
+
           {/* Lock / Logout */}
           <button
             type="button"
@@ -505,303 +581,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* =========================================================================
-          1. REMINDER KHUSUS SEKSI YANG BERSANGKUTAN & INPUT EVALUASI
-          "Setelah login dari masing-masing seksi di input maka yang pertama keluar 
-           ada reminder utk seksi yang bersangkutan dan bisa di input utk mengenai evaluasi"
+          1. METRIK UTAMA BERDASARKAN BULAN & SEKSI PILIHAN
           ========================================================================= */}
-      {activeSeksiNama && (
-        <div className="bg-white rounded-2xl border border-emerald-500/30 shadow-sm overflow-hidden animate-in fade-in duration-200">
-          {/* Header Reminder Seksi */}
-          <div className="px-3.5 py-3 bg-gradient-to-r from-emerald-900 via-slate-900 to-emerald-950 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-400 flex items-center justify-center font-bold shrink-0 shadow-xs">
-                <Bell className="w-4 h-4 animate-pulse" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-xs sm:text-sm font-black tracking-tight text-white">
-                    Reminder Program Kerja {activeSeksiNama}
-                  </h2>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/30 border border-emerald-400/40 text-emerald-200">
-                    Bulan Berjalan: {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama || `Bulan ${reminderMonth}`} {activeYearDisplay}
-                  </span>
-                </div>
-                <p className="text-[10.5px] text-slate-300 mt-0.5">
-                  Agenda pelaksanaan program & silakan langsung isi evaluasi keterlaksanaan kegiatan di bawah.
-                </p>
-              </div>
-            </div>
-
-            {/* Dragdown / Dropdown Select Bulan Lain */}
-            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-              <span className="text-[11px] font-medium text-slate-300">Pilih Bulan:</span>
-              <div className="relative">
-                <select
-                  value={reminderMonth}
-                  onChange={(e) => handleReminderMonthChange(Number(e.target.value))}
-                  className="appearance-none bg-emerald-950/90 hover:bg-emerald-900 text-white text-xs font-bold pl-2.5 pr-7 py-1 rounded-lg border border-emerald-400/50 cursor-pointer focus:outline-none focus:ring-1 focus:ring-emerald-400 shadow-xs transition-colors"
-                >
-                  {BULAN_LIST.map((b) => (
-                    <option key={b.no} value={b.no} className="text-slate-900 bg-white font-medium">
-                      {b.nama} {b.no === currentCalendarMonth ? ' (Bulan Ini)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="w-3.5 h-3.5 text-emerald-300 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
-            </div>
-          </div>
-
-          {/* Body Reminder Seksi */}
-          <div className="p-3.5 sm:p-5 space-y-4">
-            {/* Status Ringkasan Evaluasi Bulan Ini */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-bold text-slate-800">
-                  Status Evaluasi {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama}:
-                </span>
-                {scheduledForSeksiInMonth.length === 0 ? (
-                  <span className="text-slate-500 font-medium">Tidak ada program khusus terjadwal</span>
-                ) : pendingEvaluationCount > 0 ? (
-                  <span className="inline-flex items-center gap-1 font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 text-[11px]">
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                    <span>{pendingEvaluationCount} Program Perlu Diisi Evaluasi</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 text-[11px]">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Semua Program ({evaluatedCount}) Sudah Dievaluasi ✓</span>
-                  </span>
-                )}
-              </div>
-              <div className="text-[11px] text-slate-500 flex items-center gap-2">
-                <span>{scheduledForSeksiInMonth.length} Terjadwal</span>
-                <span>•</span>
-                <span>{routineForSeksi.length} Pelayanan Rutin</span>
-              </div>
-            </div>
-
-            {/* DAFTAR PROGRAM KERJA TERJADWAL & TOMBOL INPUT EVALUASI */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Program Kerja Terjadwal Bulan {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama}</span>
-                </h3>
-                <span className="text-[11px] font-bold text-slate-500">
-                  {scheduledForSeksiInMonth.length} Kegiatan
-                </span>
-              </div>
-
-              {scheduledForSeksiInMonth.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {scheduledForSeksiInMonth.map((p) => {
-                    const targetDate = p.jadwalBulanan?.[reminderMonth] || p.tanggalSpesifik;
-                    const formattedDate = targetDate ? formatIndonesianDate(targetDate) : 'Sesuai Jadwal';
-                    const evBulanIni = getEvaluasiForMonth(p, reminderMonth);
-                    const hasEvaluasi = !!evBulanIni?.statusKeterlaksanaan;
-                    const sisaBudget = getSisaBudgetUntukBulan(p, reminderMonth);
-                    const katInfo = getKategoriProgramInfo(p.kategoriProgram);
-                    const alokasiBulanIni = getAlokasiBudgetBulanan(p, reminderMonth);
-                    const catatanBulanIni = p.catatanBulanan?.[reminderMonth];
-
-                    return (
-                      <div
-                        key={p.id}
-                        className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between gap-3 shadow-xs ${
-                          hasEvaluasi
-                            ? 'bg-emerald-50/20 border-emerald-200/90 hover:border-emerald-300'
-                            : 'bg-amber-50/40 border-amber-300 hover:border-amber-400'
-                        }`}
-                      >
-                        <div>
-                          {/* Header item: Jadwal & Status Evaluasi badge & Klasifikasi */}
-                          <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-[9.5px] font-bold text-slate-500">
-                                🗓 {formattedDate}
-                              </span>
-                              <span className={`px-1.5 py-0.2 rounded border text-[9px] font-bold inline-flex items-center gap-0.5 ${katInfo.badge}`}>
-                                <span>{katInfo.iconEmoji}</span>
-                                <span>{katInfo.label}</span>
-                              </span>
-                            </div>
-                            {hasEvaluasi ? (
-                              evBulanIni?.statusKeterlaksanaan === 'terlaksana' ? (
-                                <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-extrabold flex items-center gap-1 shadow-2xs">
-                                  <CheckCircle2 className="w-3 h-3 text-emerald-700" />
-                                  <span>Terlaksana dan Sudah Dievaluasi (Bln {reminderMonth})</span>
-                                </span>
-                              ) : evBulanIni?.statusKeterlaksanaan === 'perubahan_waktu' ? (
-                                <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-extrabold flex items-center gap-1">
-                                  <span>⏳ Geser Waktu (Sudah Dievaluasi)</span>
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-900 border border-rose-300 text-[10px] font-extrabold flex items-center gap-1">
-                                  <span>✕ Tidak Terlaksana (Sudah Dievaluasi)</span>
-                                </span>
-                              )
-                            ) : (
-                              <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-extrabold flex items-center gap-1 animate-pulse">
-                                <AlertCircle className="w-3 h-3 text-amber-700" />
-                                <span>Belum Dievaluasi Bulan {BULAN_LIST[reminderMonth - 1]?.singkatan}</span>
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Nama Program */}
-                          <h4 className="text-xs sm:text-sm font-extrabold text-slate-900 leading-snug">
-                            {p.namaProgram}
-                          </h4>
-
-                          {/* Info Ringkas: Anggaran & Evaluasi info */}
-                          <div className="flex items-center gap-2 text-[10.5px] text-slate-500 mt-1 flex-wrap">
-                            <span>Pagu Awal: <strong className="text-slate-800">{formatRupiah(p.estimasiAnggaran)}</strong></span>
-                            <span>•</span>
-                            <span>Alokasi Bln Ini: <strong className="text-slate-800">{formatRupiah(alokasiBulanIni)}</strong></span>
-                            <span>•</span>
-                            <span>Sisa Budget: <strong className="text-emerald-800 font-extrabold">{formatRupiah(sisaBudget)}</strong></span>
-                            {evBulanIni?.tempatPelaksanaan && (
-                              <>
-                                <span>•</span>
-                                <span>Lokasi: {evBulanIni.tempatPelaksanaan}</span>
-                              </>
-                            )}
-                          </div>
-
-                          {/* Catatan Rencana Khusus Bulan Ini jika ada (misal: Pembentukan Panitia / Pencairan Dana) */}
-                          {catatanBulanIni && (
-                            <div className="mt-1.5 p-2 rounded-lg bg-indigo-50/80 border border-indigo-200 text-[10.5px] text-indigo-950 flex items-start gap-1.5">
-                              <span className="font-extrabold text-indigo-700 shrink-0">📝 Note Bln {BULAN_LIST[reminderMonth - 1]?.singkatan}:</span>
-                              <span className="font-medium">{catatanBulanIni}</span>
-                            </div>
-                          )}
-
-                          {/* Catatan hasil evaluasi jika sudah ada */}
-                          {evBulanIni?.penjelasanKegiatan && (
-                            <p className="text-[11px] text-slate-600 bg-white/70 p-2 rounded-lg border border-slate-200/80 mt-2 line-clamp-2">
-                              <span className="font-semibold text-slate-700">Catatan Evaluasi: </span>
-                              {evBulanIni.penjelasanKegiatan}
-                            </p>
-                          )}
-                          {evBulanIni?.alasanTidakTerlaksana && (
-                            <p className="text-[11px] text-rose-700 bg-rose-50/80 p-2 rounded-lg border border-rose-200 mt-2 line-clamp-2">
-                              <span className="font-semibold">Alasan Tidak Terlaksana: </span>
-                              {evBulanIni.alasanTidakTerlaksana}
-                            </p>
-                          )}
-                        </div>
-
-                        {/* TOMBOL AKSI: INPUT EVALUASI & LIHAT DETAIL */}
-                        <div className="flex items-center gap-2 pt-2 border-t border-slate-200/60">
-                          <button
-                            type="button"
-                            onClick={() => onOpenEvaluasi(p, reminderMonth)}
-                            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer ${
-                              hasEvaluasi
-                                ? 'bg-white hover:bg-slate-100 text-slate-800 border border-slate-300'
-                                : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 active:scale-98'
-                            }`}
-                          >
-                            <FileText className="w-3.5 h-3.5" />
-                            <span>{hasEvaluasi ? `✏️ Ubah Evaluasi (${BULAN_LIST[reminderMonth - 1]?.singkatan})` : `📝 Input Evaluasi (${BULAN_LIST[reminderMonth - 1]?.singkatan})`}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => onOpenProgramDetail(p.id)}
-                            className="py-1.5 px-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                            title="Buka detail perencanaan program"
-                          >
-                            <span>Detail</span>
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="py-6 px-4 text-center rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
-                  <Calendar className="w-7 h-7 text-slate-400 mx-auto" />
-                  <p className="text-xs font-bold text-slate-700">
-                    Tidak ada program kerja khusus non-rutin yang terjadwal di bulan {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama}.
-                  </p>
-                  <p className="text-[11px] text-slate-500 max-w-md mx-auto">
-                    Seksi {activeSeksiNama} dapat melihat kegiatan pelayanan rutin di bawah ini atau memilih bulan lain dari dropdown di atas.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* PELAYANAN RUTIN SEKSI YANG BERSANGKUTAN DENGAN AKSES INPUT EVALUASI */}
-            {routineForSeksi.length > 0 && (
-              <div className="pt-2 border-t border-slate-200">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <Repeat className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Info Pelayanan Rutin {activeSeksiNama}</span>
-                  </h3>
-                  <span className="text-[11px] font-bold text-slate-500">
-                    {routineForSeksi.length} Agenda Tetap
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {routineForSeksi.map((r) => {
-                    const evBulanIni = getEvaluasiForMonth(r, reminderMonth);
-                    const hasEvaluasi = !!evBulanIni?.statusKeterlaksanaan;
-                    const sisaBudget = getSisaBudgetUntukBulan(r, reminderMonth);
-
-                    return (
-                      <div
-                        key={r.id}
-                        className="p-3 rounded-xl bg-amber-50/30 border border-amber-200/80 hover:border-amber-300 transition-all flex items-center justify-between gap-2.5"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                            <h5 className="text-xs font-bold text-slate-900 truncate">
-                              {r.namaProgram}
-                            </h5>
-                            {evBulanIni?.statusKeterlaksanaan === 'terlaksana' && (
-                              <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[9px] font-extrabold flex items-center gap-0.5 shadow-2xs">
-                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
-                                <span>Terlaksana Bulan {BULAN_LIST[reminderMonth - 1]?.singkatan}</span>
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-slate-500 pl-3 flex items-center gap-1.5 flex-wrap">
-                            <span>Pagu: {formatRupiah(r.estimasiAnggaran)}</span>
-                            <span>•</span>
-                            <span>Sisa Bln {reminderMonth}: <strong className="text-emerald-800 font-extrabold">{formatRupiah(sisaBudget)}</strong></span>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => onOpenEvaluasi(r, reminderMonth)}
-                          className={`px-2.5 py-1 rounded-lg text-[10.5px] font-bold border transition-colors flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs ${
-                            hasEvaluasi
-                              ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
-                              : 'bg-white hover:bg-amber-100 text-amber-900 border-amber-300'
-                          }`}
-                          title={`Input atau lihat evaluasi pelayanan rutin bulan ${BULAN_LIST[reminderMonth - 1]?.nama}`}
-                        >
-                          <FileText className="w-3 h-3 text-amber-700" />
-                          <span>{hasEvaluasi ? `✓ Selesai (${BULAN_LIST[reminderMonth - 1]?.singkatan})` : `Evaluasi (${BULAN_LIST[reminderMonth - 1]?.singkatan})`}</span>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 2. METRIK UTAMA BERDASARKAN BULAN & SEKSI PILIHAN */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full">
         {/* Metric 1: Total Program (Terjadwal vs Pelayanan Rutin) */}
         <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-2xs">
@@ -898,6 +679,613 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* =========================================================================
+          2. PILIHAN TAMPILAN DASHBOARD (2 PILIHAN DENGAN MODE SEMBUNYIKAN / HIDE)
+          "Di Dashboard hny tampila 2 plih Program yang akan di laksanakan pada bulan 
+           berjalan dan program secara keseluruhan jadi itu di hide dulu nanti akan di plih mana yang akan di lihat"
+          ========================================================================= */}
+      <div className="bg-white p-2 sm:p-2.5 rounded-2xl border border-slate-200/90 shadow-2xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {/* Pilihan 1: Program yang Dilaksanakan pada Bulan Berjalan */}
+          <button
+            type="button"
+            onClick={() => setDashboardViewMode('bulan_berjalan')}
+            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+              dashboardViewMode === 'bulan_berjalan'
+                ? 'bg-gradient-to-r from-emerald-900 via-slate-900 to-emerald-950 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-500/30'
+                : 'bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-200'
+            }`}
+          >
+            <div
+              className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-bold ${
+                dashboardViewMode === 'bulan_berjalan'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                  : 'bg-white text-emerald-700 border border-slate-200 shadow-2xs'
+              }`}
+            >
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs sm:text-sm font-black tracking-tight">
+                  1. Program Bulan Berjalan
+                </span>
+                <span
+                  className={`text-[9.5px] font-bold px-1.5 py-0.2 rounded-md ${
+                    dashboardViewMode === 'bulan_berjalan'
+                      ? 'bg-emerald-500/30 text-emerald-200 border border-emerald-400/30'
+                      : 'bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama || `Bulan ${reminderMonth}`}
+                </span>
+              </div>
+              <p
+                className={`text-[11px] mt-0.5 line-clamp-1 ${
+                  dashboardViewMode === 'bulan_berjalan' ? 'text-slate-300' : 'text-slate-500'
+                }`}
+              >
+                {scheduledInReminderMonth.length} Terjadwal • {evaluatedInReminderMonth.length} Sudah Dievaluasi • {pendingInReminderMonth.length} Berjalan
+              </p>
+            </div>
+          </button>
+
+          {/* Pilihan 2: Program Secara Keseluruhan */}
+          <button
+            type="button"
+            onClick={() => setDashboardViewMode('keseluruhan')}
+            className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+              dashboardViewMode === 'keseluruhan'
+                ? 'bg-gradient-to-r from-emerald-900 via-slate-900 to-emerald-950 text-white border-emerald-500 shadow-sm ring-2 ring-emerald-500/30'
+                : 'bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-200'
+            }`}
+          >
+            <div
+              className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-bold ${
+                dashboardViewMode === 'keseluruhan'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                  : 'bg-white text-indigo-700 border border-slate-200 shadow-2xs'
+              }`}
+            >
+              <FileText className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs sm:text-sm font-black tracking-tight">
+                  2. Program Secara Keseluruhan
+                </span>
+                <span
+                  className={`text-[9.5px] font-bold px-1.5 py-0.2 rounded-md ${
+                    dashboardViewMode === 'keseluruhan'
+                      ? 'bg-emerald-500/30 text-emerald-200 border border-emerald-400/30'
+                      : 'bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  {allActiveProgramsInView.length} Total Proker
+                </span>
+              </div>
+              <p
+                className={`text-[11px] mt-0.5 line-clamp-1 ${
+                  dashboardViewMode === 'keseluruhan' ? 'text-slate-300' : 'text-slate-500'
+                }`}
+              >
+                Tampilan lengkap seluruh Seksi, DPPH & Pelayanan Rutin setahun
+              </p>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* =========================================================================
+          MODE 1: PROGRAM YANG DILAKSANAKAN PADA BULAN BERJALAN (VIEW-ONLY)
+          Sesuai permintaan: Program bulan berjalan ditampilkan & program keseluruhan di-hide
+          ========================================================================= */}
+      {dashboardViewMode === 'bulan_berjalan' && (
+        <div className="space-y-4 animate-in fade-in duration-200 w-full">
+          {/* Header Kontrol Bulan & Banner Info View-Only */}
+          <div className="bg-white rounded-2xl border border-emerald-500/30 shadow-xs overflow-hidden">
+            <div className="px-4 py-3.5 bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 flex items-center justify-center font-bold shrink-0">
+                  <Calendar className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-white">
+                    Program Kerja Bulan {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama || `Bulan ${reminderMonth}`} {activeYearDisplay}
+                  </h3>
+                  <p className="text-[10.5px] text-slate-300 mt-0.5">
+                    Monitoring kegiatan yang sudah berjalan & dievaluasi maupun yang direncanakan bulan ini (View-Only).
+                  </p>
+                </div>
+              </div>
+
+              {/* Selector Bulan Berjalan */}
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                <span className="text-[11px] font-medium text-slate-300">Pilih Bulan:</span>
+                <div className="relative">
+                  <select
+                    value={reminderMonth}
+                    onChange={(e) => handleReminderMonthChange(Number(e.target.value))}
+                    className="appearance-none bg-emerald-900/90 hover:bg-emerald-800 text-white text-xs font-bold pl-2.5 pr-7 py-1 rounded-lg border border-emerald-400/50 cursor-pointer focus:outline-none focus:ring-1 focus:ring-emerald-400 shadow-xs transition-colors"
+                  >
+                    {BULAN_LIST.map((b) => (
+                      <option key={b.no} value={b.no} className="text-slate-900 bg-white font-medium">
+                        {b.nama} {b.no === currentCalendarMonth ? ' (Bulan Ini)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 text-emerald-300 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+              </div>
+            </div>
+
+            {/* Banner Edukasi Pengisian Evaluasi Berpindah ke Menu Program */}
+            <div className="p-3 sm:p-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+              <div className="flex items-center gap-2 text-slate-700">
+                <ClipboardCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="text-[11px]">
+                  Dashboard ini bersifat <strong>View / Pemantauan</strong>. Untuk mengisi atau memperbarui evaluasi kegiatan, gunakan menu khusus:
+                </span>
+              </div>
+              {onNavigateToEvaluasiTab && (
+                <button
+                  type="button"
+                  onClick={onNavigateToEvaluasiTab}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs transition-colors shrink-0 cursor-pointer active:scale-98"
+                >
+                  <ClipboardCheck className="w-3.5 h-3.5" />
+                  <span>Buka Menu Pengisian Evaluasi Program &rarr;</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* BAGIAN A: PROGRAM YANG SUDAH BERJALAN & SUDAH DIEVALUASI */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                  Program yang Sudah Berjalan & Sudah Dievaluasi ({evaluatedInReminderMonth.length})
+                </h4>
+              </div>
+              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                Bulan {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama}
+              </span>
+            </div>
+
+            {evaluatedInReminderMonth.length === 0 ? (
+              <div className="p-5 text-center rounded-xl bg-white border border-slate-200 space-y-1.5">
+                <CheckCircle2 className="w-6 h-6 text-slate-300 mx-auto" />
+                <p className="text-xs font-bold text-slate-700">
+                  Belum ada program yang sudah dievaluasi di bulan {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama}.
+                </p>
+                <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                  Program yang sudah terlaksana dapat diisi evaluasinya melalui menu{' '}
+                  <button
+                    type="button"
+                    onClick={onNavigateToEvaluasiTab}
+                    className="text-emerald-700 font-bold hover:underline cursor-pointer"
+                  >
+                    Pengisian Evaluasi Program
+                  </button>.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {evaluatedInReminderMonth.map((p) => {
+                  const evBulanIni = getEvaluasiForMonth(p, reminderMonth);
+                  const sisaBudget = getSisaBudgetUntukBulan(p, reminderMonth);
+                  const detailPagu = getDetailPaguBulanan(p, reminderMonth);
+                  const katInfo = getKategoriProgramInfo(p.kategoriProgram);
+
+                  return (
+                    <div
+                      key={p.id}
+                      className="p-3.5 rounded-xl border bg-emerald-50/25 border-emerald-200/90 hover:border-emerald-300 transition-all flex flex-col justify-between gap-3 shadow-2xs"
+                    >
+                      {(() => {
+                        const summary = getProgramExecutionSummary(p, reminderMonth);
+                        const isSebagian = summary.overallStatus === 'terlaksana_sebagian';
+
+                        return (
+                          <div className="space-y-2">
+                            {/* Header Badge */}
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[9.5px] font-extrabold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                  No. #{p.nomorUrut || p.id}
+                                </span>
+                                <span className="text-[9.5px] font-bold text-slate-500">
+                                  {p.penanggungjawab?.divisi || 'Seksi'}
+                                </span>
+                                <span className={`px-1.5 py-0.2 rounded border text-[9px] font-bold inline-flex items-center gap-0.5 ${katInfo.badge}`}>
+                                  <span>{katInfo.iconEmoji}</span>
+                                  <span>{katInfo.label}</span>
+                                </span>
+                              </div>
+
+                              {isSebagian ? (
+                                <span className="px-2 py-0.5 rounded-md bg-teal-100 text-teal-950 border border-teal-300 text-[10px] font-extrabold flex items-center gap-1 shadow-2xs">
+                                  <CheckCircle2 className="w-3 h-3 text-teal-700" />
+                                  <span>✓ Terlaksana Sebagian</span>
+                                </span>
+                              ) : evBulanIni?.statusKeterlaksanaan === 'terlaksana' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-extrabold flex items-center gap-1 shadow-2xs">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                  <span>✓ Terlaksana &amp; Sudah Dievaluasi</span>
+                                </span>
+                              ) : evBulanIni?.statusKeterlaksanaan === 'perubahan_waktu' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-extrabold flex items-center gap-1">
+                                  <span>⏳ Geser Waktu (Sudah Dievaluasi)</span>
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-900 border border-rose-300 text-[10px] font-extrabold flex items-center gap-1">
+                                  <span>✕ Tidak Terlaksana (Sudah Dievaluasi)</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Nama Program */}
+                            <h4 className="text-xs sm:text-sm font-extrabold text-slate-900 leading-snug">
+                              {p.namaProgram}
+                            </h4>
+
+                            {/* Financial summary: Pagu vs Realisasi vs Sisa */}
+                            <div className="p-2 rounded-lg bg-white/80 border border-emerald-200/60 grid grid-cols-3 gap-2 text-center text-[10.5px]">
+                              <div>
+                                <span className="text-[9.5px] text-slate-500 block">Pagu Bln Ini</span>
+                                <strong className="text-slate-800 font-bold">{formatRupiah(detailPagu.pagu)}</strong>
+                              </div>
+                              <div>
+                                <span className="text-[9.5px] text-slate-500 block">Realisasi Biaya</span>
+                                <strong className="text-rose-700 font-bold">{formatRupiah(evBulanIni?.anggaranTerpakai || 0)}</strong>
+                              </div>
+                              <div>
+                                <span className="text-[9.5px] text-slate-500 block">Sisa Anggaran</span>
+                                <strong className={sisaBudget < 0 ? "text-rose-600 font-black" : "text-emerald-800 font-extrabold"}>
+                                  {formatRupiah(sisaBudget)}
+                                </strong>
+                              </div>
+                            </div>
+
+                            {/* Catatan Status Terlaksana Sebagian */}
+                            {isSebagian && (
+                              <div className="p-2 rounded-lg bg-teal-50 border border-teal-200 text-[10.5px] text-teal-950 space-y-1">
+                                <div className="flex items-center gap-1 font-bold text-teal-900">
+                                  <CheckCircle2 className="w-3 h-3 text-teal-600" />
+                                  <span>Progres: {summary.terlaksanaMonths.length} dari {summary.scheduledMonths.length} bulan terlaksana</span>
+                                </div>
+                                {summary.catatanBulanSudahTerlaksana && (
+                                  <div className="text-[10px] text-slate-700">
+                                    Selesai: <strong>{summary.catatanBulanSudahTerlaksana}</strong>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Daftar Bulan yang Tidak Terlaksana Beserta Alasannya */}
+                            {summary.rincianTidakTerlaksana && summary.rincianTidakTerlaksana.length > 0 && (
+                              <div className="p-2 rounded-lg bg-rose-50/90 border border-rose-200 text-[10.5px] text-rose-950 space-y-1">
+                                <span className="font-bold text-rose-800">Bulan yang Tidak Terlaksana Beserta Alasannya:</span>
+                                <div className="space-y-0.5 pl-1">
+                                  {summary.rincianTidakTerlaksana.map((r) => (
+                                    <div key={r.bulan} className="text-slate-800 text-[10.5px]">
+                                      <strong className="text-rose-950">• Bulan {r.namaBulan}:</strong> {r.alasan || 'Tidak ada alasan dicantumkan'}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Hasil Evaluasi & Catatan */}
+                            {evBulanIni?.penjelasanKegiatan && (
+                              <div className="p-2 rounded-lg bg-white/90 border border-slate-200 text-[11px] text-slate-700">
+                                <span className="font-bold text-slate-800">Catatan Kegiatan: </span>
+                                <span>{evBulanIni.penjelasanKegiatan}</span>
+                              </div>
+                            )}
+
+                            {(evBulanIni?.statusKeterlaksanaan === 'tidak_terlaksana' || evBulanIni?.alasanPerubahanWaktu) && !summary.rincianTidakTerlaksana?.length && (
+                              <div className="p-2 rounded-lg bg-amber-50/80 border border-amber-200 text-[10.5px] text-amber-950">
+                                <span className="font-bold text-amber-800">Kendala / Alasan: </span>
+                                <span>
+                                  {evBulanIni.statusKeterlaksanaan === 'tidak_terlaksana'
+                                    ? (evBulanIni.alasanTidakTerlaksana?.trim() || 'Tidak ada alasan dicantumkan')
+                                    : (evBulanIni.alasanPerubahanWaktu || 'Tidak ada alasan dicantumkan')}
+                                </span>
+                              </div>
+                            )}
+
+                            {evBulanIni?.evaluator && (
+                              <div className="text-[10px] text-slate-500 flex items-center gap-2">
+                                <span>Dievaluasi oleh: <strong>{evBulanIni.evaluator}</strong></span>
+                                {evBulanIni.tanggalEvaluasi && (
+                                  <>
+                                    <span>•</span>
+                                    <span>Tgl: {formatIndonesianDate(evBulanIni.tanggalEvaluasi)}</span>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Tombol View Detail Program */}
+                      <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-end">
+                        <button
+                          type="button"
+                          onClick={() => onOpenProgramDetail(p.id)}
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                        >
+                          <span>Lihat Rincian Program</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* BAGIAN B: PROGRAM YANG AKAN / SEDANG DILAKSANAKAN PADA BULAN INI */}
+          <div className="space-y-2.5 pt-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-amber-500" />
+                <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                  Program yang Akan / Sedang Dilaksanakan ({pendingInReminderMonth.length})
+                </h4>
+              </div>
+              <span className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                Agenda Terjadwal Bulan {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama}
+              </span>
+            </div>
+
+            {pendingInReminderMonth.length === 0 ? (
+              <div className="p-5 text-center rounded-xl bg-white border border-slate-200 space-y-1.5">
+                <Calendar className="w-6 h-6 text-slate-300 mx-auto" />
+                <p className="text-xs font-bold text-slate-700">
+                  Tidak ada agenda program yang belum dievaluasi pada bulan {BULAN_LIST.find((b) => b.no === reminderMonth)?.nama}.
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Semua program terjadwal pada bulan ini telah selesai atau belum memiliki jadwal khusus.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {pendingInReminderMonth.map((p) => {
+                  const targetDate = p.jadwalBulanan?.[reminderMonth] || p.tanggalSpesifik;
+                  const formattedDate = targetDate ? formatIndonesianDate(targetDate) : 'Sesuai Jadwal';
+                  const sisaBudget = getSisaBudgetUntukBulan(p, reminderMonth);
+                  const detailPagu = getDetailPaguBulanan(p, reminderMonth);
+                  const alokasiBulanIni = getAlokasiBudgetBulanan(p, reminderMonth);
+                  const katInfo = getKategoriProgramInfo(p.kategoriProgram);
+                  const catatanBulanIni = p.catatanBulanan?.[reminderMonth];
+
+                  return (
+                    <div
+                      key={p.id}
+                      className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between gap-3 shadow-2xs ${
+                        detailPagu.isMinus
+                          ? 'bg-rose-50/40 border-rose-300'
+                          : 'bg-white border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[9.5px] font-extrabold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                              No. #{p.nomorUrut || p.id}
+                            </span>
+                            <span className="text-[9.5px] font-bold text-slate-500">
+                              {p.penanggungjawab?.divisi || 'Seksi'}
+                            </span>
+                            <span className={`px-1.5 py-0.2 rounded border text-[9px] font-bold inline-flex items-center gap-0.5 ${katInfo.badge}`}>
+                              <span>{katInfo.iconEmoji}</span>
+                              <span>{katInfo.label}</span>
+                            </span>
+                            {detailPagu.isMinus && (
+                              <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white text-[9px] font-black uppercase tracking-wider animate-pulse">
+                                ⚠️ Pagu Minus
+                              </span>
+                            )}
+                          </div>
+                          {(() => {
+                            const pendingSummary = getProgramExecutionSummary(p, reminderMonth);
+                            if (pendingSummary.overallStatus === 'terlaksana_sebagian') {
+                              return (
+                                <span className="px-2 py-0.5 rounded-md bg-teal-50 text-teal-950 border border-teal-300 text-[10px] font-bold">
+                                  ✓ Terlaksana Sebagian (Bln Ini Belum)
+                                </span>
+                              );
+                            }
+                            if (pendingSummary.rincianTidakTerlaksana.length > 0) {
+                              return (
+                                <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-950 border border-amber-300 text-[10px] font-bold">
+                                  ⚠️ Direncanakan ({pendingSummary.rincianTidakTerlaksana.length} Bln Lain Batal)
+                                </span>
+                              );
+                            }
+                            return (
+                              <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-900 border border-amber-200 text-[10px] font-bold">
+                                ⏳ Direncanakan Bulan Ini
+                              </span>
+                            );
+                          })()}
+                        </div>
+
+                        <h4 className="text-xs sm:text-sm font-extrabold text-slate-900 leading-snug">
+                          {p.namaProgram}
+                        </h4>
+
+                        <div className="flex items-center gap-2 text-[10.5px] text-slate-500 flex-wrap">
+                          <span>🗓 {formattedDate}</span>
+                          <span>•</span>
+                          <span>Total Pagu: <strong className="text-slate-800">{formatRupiah(p.estimasiAnggaran)}</strong></span>
+                          <span>•</span>
+                          <span>
+                            {detailPagu.isMultiMonthCarryover ? 'Sisa Pagu Bln Ini: ' : 'Alokasi Bln Ini: '}
+                            <strong className={detailPagu.isMinus ? "text-rose-600 font-black" : "text-slate-800 font-extrabold"}>
+                              {formatRupiah(alokasiBulanIni)}
+                            </strong>
+                          </span>
+                          <span>•</span>
+                          <span>Sisa Budget: <strong className={sisaBudget < 0 ? "text-rose-600 font-black" : "text-emerald-800 font-extrabold"}>{formatRupiah(sisaBudget)}</strong></span>
+                        </div>
+
+                        {/* Catatan Khusus Rencana Bulan Ini */}
+                        {catatanBulanIni && (
+                          <div className="p-2 rounded-lg bg-indigo-50/80 border border-indigo-200 text-[10.5px] text-indigo-950 flex items-start gap-1.5">
+                            <span className="font-extrabold text-indigo-700 shrink-0">📝 Note Bln {BULAN_LIST[reminderMonth - 1]?.singkatan}:</span>
+                            <span className="font-medium">{catatanBulanIni}</span>
+                          </div>
+                        )}
+
+                        {detailPagu.isMinus && (
+                          <div className="p-2 rounded-lg bg-rose-100/80 border border-rose-300 text-[10.5px] text-rose-950 flex items-start gap-1.5 font-semibold">
+                            <span className="text-rose-700 font-black shrink-0">⚠️ Pagu Minus:</span>
+                            <span>
+                              Pengeluaran di bulan sebelumnya ({formatRupiah(detailPagu.terpakaiSebelumnya)}) telah melebihi total pagu anggaran ({formatRupiah(detailPagu.totalPagu)}). Sisa pagu saat ini defisit <strong>{formatRupiah(detailPagu.pagu)}</strong>.
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-200/60 flex items-center justify-end">
+                        <button
+                          type="button"
+                          onClick={() => onOpenProgramDetail(p.id)}
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                        >
+                          <span>Lihat Rincian Program</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* BAGIAN C: PELAYANAN RUTIN DI BULAN INI */}
+          {routineInReminderMonth.length > 0 && (
+            <div className="space-y-2.5 pt-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-indigo-500" />
+                  <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                    Pelayanan Rutin di Bulan Ini ({routineInReminderMonth.length})
+                  </h4>
+                </div>
+                <span className="text-[11px] font-bold text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                  Agenda Tetap Bulanan
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {routineInReminderMonth.map((r) => {
+                  const evBulanIni = getEvaluasiForMonth(r, reminderMonth);
+                  const hasEvaluasi = !!evBulanIni?.statusKeterlaksanaan && evBulanIni.statusKeterlaksanaan !== 'belum_terlaksana';
+                  const sisaBudget = getSisaBudgetUntukBulan(r, reminderMonth);
+
+                  return (
+                    <div
+                      key={r.id}
+                      className="p-3 rounded-xl bg-white border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-between gap-2.5 shadow-2xs"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
+                          <h5 className="text-xs font-bold text-slate-900 truncate">
+                            {r.namaProgram}
+                          </h5>
+                          <span className="text-[9px] font-bold text-slate-500">
+                            ({r.penanggungjawab?.divisi || 'Seksi'})
+                          </span>
+                          {hasEvaluasi && (
+                            evBulanIni?.statusKeterlaksanaan === 'terlaksana' ? (
+                              <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[9px] font-extrabold flex items-center gap-0.5 shadow-2xs">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
+                                <span>✓ Terlaksana Bln {reminderMonth}</span>
+                              </span>
+                            ) : evBulanIni?.statusKeterlaksanaan === 'perubahan_waktu' ? (
+                              <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[9px] font-extrabold shadow-2xs">
+                                ⏳ Geser Waktu
+                              </span>
+                            ) : evBulanIni?.statusKeterlaksanaan === 'tidak_terlaksana' ? (
+                              <span className="px-1.5 py-0.2 rounded bg-rose-100 text-rose-900 border border-rose-300 text-[9px] font-extrabold shadow-2xs">
+                                ✕ Tidak Terlaksana
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[9px] font-extrabold flex items-center gap-0.5 shadow-2xs">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
+                                <span>✓ Sudah Dievaluasi</span>
+                              </span>
+                            )
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500 pl-3 flex items-center gap-1.5 flex-wrap">
+                          <span>Pagu: {formatRupiah(r.estimasiAnggaran)}</span>
+                          <span>•</span>
+                          <span>Sisa Bln {reminderMonth}: <strong className="text-emerald-800 font-extrabold">{formatRupiah(sisaBudget)}</strong></span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => onOpenProgramDetail(r.id)}
+                        className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs"
+                      >
+                        <span>Detail</span>
+                        <ChevronRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODE 2: PROGRAM SECARA KESELURUHAN (VIEW-ONLY)
+          Sesuai permintaan: Program bulan berjalan di-hide saat mode ini aktif
+          ========================================================================= */}
+      {dashboardViewMode === 'keseluruhan' && (
+        <div className="space-y-4 animate-in fade-in duration-200 w-full">
+          {/* Banner Info View-Only untuk Mode Keseluruhan */}
+          <div className="p-3 sm:p-3.5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-400/40 text-indigo-300 flex items-center justify-center font-bold shrink-0">
+                <FileText className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs sm:text-sm font-black text-white">
+                  Tampilan Program Kerja Secara Keseluruhan ({allActiveProgramsInView.length} Program)
+                </h4>
+                <p className="text-[10.5px] text-slate-300 mt-0.5">
+                  Menampilkan seluruh perencanaan DPPH, Seksi & Pelayanan Rutin (View-Only).
+                </p>
+              </div>
+            </div>
+
+            {onNavigateToEvaluasiTab && (
+              <button
+                type="button"
+                onClick={onNavigateToEvaluasiTab}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs transition-colors shrink-0 cursor-pointer active:scale-98"
+              >
+                <ClipboardCheck className="w-3.5 h-3.5" />
+                <span>Pengisian Evaluasi Program &rarr;</span>
+              </button>
+            )}
+          </div>
 
       {/* 2B. BANNER KHUSUS PROGRAM TERLAKSANA DI LUAR RANCANGAN (INSIDENTAL) */}
       <div className="bg-gradient-to-r from-amber-50/90 via-orange-50/70 to-amber-50/90 border border-amber-200/90 p-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs">
@@ -1046,27 +1434,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     {seksiScheduled.length > 0 ? (
                       <div className="space-y-1 w-full">
                         {seksiScheduled.map((p) => {
-                          const targetMonth = typeof selectedMonth === 'number' ? selectedMonth : 10;
+                          const targetMonth = typeof selectedMonth === 'number' ? selectedMonth : currentCalendarMonth;
                           const targetDate =
                             typeof selectedMonth === 'number'
                               ? p.jadwalBulanan?.[selectedMonth] || p.tanggalSpesifik
                               : p.tanggalSpesifik;
                           const formattedDate = targetDate ? formatIndonesianDate(targetDate) : 'Sesuai Jadwal';
-                          const evBulanIni = getEvaluasiForMonth(p, targetMonth);
+                          const evBulanIni =
+                            selectedMonth === 'all'
+                              ? getLatestEvaluasi(p, 'all')
+                              : getEvaluasiForMonth(p, selectedMonth);
                           const sisaBudget = getSisaBudgetUntukBulan(p, targetMonth);
                           const katInfo = getKategoriProgramInfo(p.kategoriProgram);
                           const catatanBulanIni = p.catatanBulanan?.[targetMonth];
                           const alokasiBulanIni = getAlokasiBudgetBulanan(p, targetMonth);
+                          const detailPagu = getDetailPaguBulanan(p, targetMonth);
+                          const summary = getProgramExecutionSummary(p, selectedMonth);
+                          const isSebagian = summary.overallStatus === 'terlaksana_sebagian';
+                          const isPenuh = selectedMonth === 'all' && summary.overallStatus === 'terlaksana_penuh';
 
                           return (
                             <div
                               key={p.id}
-                              className="w-full text-left p-2.5 rounded-lg bg-white border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/40 transition-all flex items-center justify-between gap-2.5 group shadow-2xs"
+                              className={`w-full text-left p-2.5 rounded-lg border transition-all flex items-center justify-between gap-2.5 group shadow-2xs ${
+                                detailPagu.isMinus
+                                  ? 'bg-rose-50/40 border-rose-300 hover:border-rose-400'
+                                  : isSebagian
+                                  ? 'bg-teal-50/20 border-teal-200 hover:border-teal-300'
+                                  : 'bg-white border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/40'
+                              }`}
                             >
                               <button
                                 type="button"
                                 onClick={() => onOpenProgramDetail(p.id)}
                                 className="min-w-0 flex-1 text-left cursor-pointer"
+                                title="Klik untuk membuka rincian lengkap program ini"
                               >
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded border ${getStatusInfo(p.status).color}`}>
@@ -1081,22 +1483,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                       <span>Luar Rancangan</span>
                                     </span>
                                   )}
-                                  {evBulanIni?.statusKeterlaksanaan === 'terlaksana' && (
-                                    <span className="text-[8.5px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-0.5 shadow-2xs">
-                                      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
-                                      <span>Terlaksana Bln {targetMonth}</span>
+                                  {detailPagu.isMinus && (
+                                    <span className="text-[8.5px] font-black px-1.5 py-0.2 rounded bg-rose-600 text-white">
+                                      ⚠️ Pagu Minus
                                     </span>
                                   )}
-                                  {evBulanIni?.statusKeterlaksanaan === 'tidak_terlaksana' && (
+                                  {isSebagian ? (
+                                    <span className="text-[8.5px] font-black px-1.5 py-0.2 rounded bg-teal-100 text-teal-950 border border-teal-300 flex items-center gap-0.5 shadow-2xs">
+                                      <CheckCircle2 className="w-2.5 h-2.5 text-teal-700" />
+                                      <span>Terlaksana Sebagian</span>
+                                    </span>
+                                  ) : isPenuh || evBulanIni?.statusKeterlaksanaan === 'terlaksana' ? (
+                                    <span className="text-[8.5px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-0.5 shadow-2xs">
+                                      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
+                                      <span>{selectedMonth === 'all' ? '✓ Terlaksana & Dievaluasi' : `Terlaksana Bln ${targetMonth}`}</span>
+                                    </span>
+                                  ) : evBulanIni?.statusKeterlaksanaan === 'tidak_terlaksana' || summary.overallStatus === 'tidak_terlaksana' ? (
                                     <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
                                       ✕ Tidak Terlaksana
                                     </span>
-                                  )}
-                                  {evBulanIni?.statusKeterlaksanaan === 'perubahan_waktu' && (
+                                  ) : evBulanIni?.statusKeterlaksanaan === 'perubahan_waktu' || summary.overallStatus === 'perubahan_waktu' ? (
                                     <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
-                                      ⏳ Geser Waktu {evBulanIni.jadwalBaru ? `(${evBulanIni.jadwalBaru})` : ''}
+                                      ⏳ Geser Waktu {evBulanIni?.jadwalBaru ? `(${evBulanIni.jadwalBaru})` : ''}
                                     </span>
-                                  )}
+                                  ) : null}
                                   <p className="text-[11.5px] sm:text-xs font-bold text-slate-900 group-hover:text-emerald-950 truncate">
                                     {p.namaProgram}
                                   </p>
@@ -1104,17 +1514,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5 flex-wrap">
                                   <span>🗓 {formattedDate}</span>
                                   <span>•</span>
-                                  <span>Pagu: {formatRupiah(p.estimasiAnggaran)}</span>
-                                  {alokasiBulanIni > 0 && (
-                                    <>
-                                      <span>•</span>
-                                      <span>Alokasi Bln Ini: <strong className="text-slate-800">{formatRupiah(alokasiBulanIni)}</strong></span>
-                                    </>
-                                  )}
+                                  <span>Total Pagu: {formatRupiah(p.estimasiAnggaran)}</span>
                                   <span>•</span>
-                                  <span className="font-extrabold text-emerald-800">
-                                    Sisa: {formatRupiah(sisaBudget)}
+                                  <span>
+                                    {detailPagu.isMultiMonthCarryover ? 'Sisa Pagu: ' : 'Alokasi Bln: '}
+                                    <strong className={detailPagu.isMinus ? "text-rose-600 font-black" : "text-slate-800 font-bold"}>
+                                      {formatRupiah(alokasiBulanIni)}
+                                    </strong>
                                   </span>
+                                  <span>•</span>
+                                  <span className={`font-extrabold ${sisaBudget < 0 ? 'text-rose-600' : 'text-emerald-800'}`}>
+                                    Sisa Budget: {formatRupiah(sisaBudget)}
+                                  </span>
+                                  {summary.rincianTidakTerlaksana && summary.rincianTidakTerlaksana.length > 0 && (
+                                    <span className="text-[9.5px] text-rose-900 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded font-medium">
+                                      ✕ Bulan Batal: {summary.rincianTidakTerlaksana.map((r) => `${r.namaBulan} (${r.alasan || 'Tidak ada alasan dicantumkan'})`).join('; ')}
+                                    </span>
+                                  )}
                                   {catatanBulanIni && (
                                     <span className="text-[9.5px] text-indigo-800 bg-indigo-50 border border-indigo-200 px-1 py-0.2 rounded font-medium">
                                       Note: {catatanBulanIni}
@@ -1123,31 +1539,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 </div>
                               </button>
 
-                              {/* Tombol Aksi: Evaluasi & Buka Detail */}
+                              {/* Tombol Aksi: Lihat Detail Program */}
                               <div className="flex items-center gap-1 shrink-0">
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onOpenEvaluasi(p, targetMonth);
-                                  }}
-                                  className={`px-2 py-1 rounded-md text-[9.5px] font-bold border transition-colors flex items-center gap-1 cursor-pointer shadow-2xs ${
-                                    evBulanIni?.statusKeterlaksanaan
-                                      ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
-                                      : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-                                  }`}
-                                  title={`Isi atau lihat evaluasi pelaksanaan bulan ${targetMonth}`}
-                                >
-                                  <FileText className="w-3 h-3 text-amber-700" />
-                                  <span>{evBulanIni?.statusKeterlaksanaan ? `✓ Evaluasi (${targetMonth})` : `Evaluasi (${targetMonth})`}</span>
-                                </button>
-
-                                <button
-                                  type="button"
                                   onClick={() => onOpenProgramDetail(p.id)}
-                                  className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-md hover:bg-emerald-100 transition-colors flex items-center gap-0.5 cursor-pointer shadow-2xs"
+                                  className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-2.5 py-1 rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                                  title="Buka rincian lengkap program kerja"
                                 >
-                                  <span>Buka</span>
+                                  <span>Detail</span>
                                   <ChevronRight className="w-3 h-3" />
                                 </button>
                               </div>
@@ -1206,8 +1606,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                             <div className="space-y-1.5 w-full">
                               {seksiRoutine.map((r, rIdx) => {
-                                const targetMonth = typeof selectedMonth === 'number' ? selectedMonth : 10;
-                                const evBulanIni = getEvaluasiForMonth(r, targetMonth);
+                                const targetMonth = typeof selectedMonth === 'number' ? selectedMonth : reminderMonth;
+                                const rSummary = getProgramExecutionSummary(r, selectedMonth);
+                                const evBulanIni =
+                                  typeof selectedMonth === 'number'
+                                    ? getEvaluasiForMonth(r, selectedMonth)
+                                    : getLatestEvaluasi(r, 'all');
                                 const sisaBudget = getSisaBudgetUntukBulan(r, targetMonth);
 
                                 return (
@@ -1224,22 +1628,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                         <h5 className="text-xs font-bold text-slate-900 truncate">
                                           {r.namaProgram}
                                         </h5>
-                                        {evBulanIni?.statusKeterlaksanaan === 'terlaksana' && (
+                                        {rSummary.overallStatus === 'terlaksana_sebagian' ? (
+                                          <span className="text-[8.5px] font-extrabold px-1.5 py-0.2 rounded bg-teal-100 text-teal-950 border border-teal-300 flex items-center gap-0.5 shadow-2xs">
+                                            <CheckCircle2 className="w-2.5 h-2.5 text-teal-700" />
+                                            <span>Terlaksana Sebagian ({rSummary.terlaksanaMonths.length}/{rSummary.scheduledMonths.length} Bln)</span>
+                                          </span>
+                                        ) : (typeof selectedMonth === 'number' && evBulanIni?.statusKeterlaksanaan === 'terlaksana') || (selectedMonth === 'all' && rSummary.overallStatus === 'terlaksana_penuh') ? (
                                           <span className="text-[8.5px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-0.5 shadow-2xs">
                                             <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
-                                            <span>Terlaksana Bln {targetMonth}</span>
+                                            <span>{typeof selectedMonth === 'number' ? `Terlaksana Bln ${selectedMonth}` : 'Terlaksana & Sudah Dievaluasi'}</span>
                                           </span>
-                                        )}
-                                        {evBulanIni?.statusKeterlaksanaan === 'tidak_terlaksana' && (
+                                        ) : evBulanIni?.statusKeterlaksanaan === 'tidak_terlaksana' || rSummary.overallStatus === 'tidak_terlaksana' ? (
                                           <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
                                             ✕ Tidak Terlaksana
                                           </span>
-                                        )}
-                                        {evBulanIni?.statusKeterlaksanaan === 'perubahan_waktu' && (
+                                        ) : evBulanIni?.statusKeterlaksanaan === 'perubahan_waktu' || rSummary.overallStatus === 'perubahan_waktu' ? (
                                           <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
-                                            ⏳ Geser Waktu {evBulanIni.jadwalBaru ? `(${evBulanIni.jadwalBaru})` : ''}
+                                            ⏳ Geser Waktu {evBulanIni?.jadwalBaru ? `(${evBulanIni.jadwalBaru})` : ''}
                                           </span>
-                                        )}
+                                        ) : rSummary.rincianTidakTerlaksana.length > 0 ? (
+                                          <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-950 border border-amber-300">
+                                            ⚠️ Sudah Dievaluasi ({rSummary.rincianTidakTerlaksana.length} Bln Batal)
+                                          </span>
+                                        ) : null}
                                       </div>
                                       {r.tujuanKegiatan && (
                                         <p className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">
@@ -1260,28 +1671,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                     </div>
                                   </div>
 
-                                  {/* Tombol Aksi: Evaluasi & Buka Program */}
+                                  {/* Tombol Aksi: Lihat Detail Program */}
                                   <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
                                     <button
                                       type="button"
-                                      onClick={() => onOpenEvaluasi(r, targetMonth)}
-                                      className={`px-2 py-1 rounded-md text-[9.5px] font-bold border transition-colors flex items-center gap-1 cursor-pointer shadow-2xs ${
-                                        evBulanIni?.statusKeterlaksanaan
-                                          ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
-                                          : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-                                      }`}
-                                      title={`Isi atau lihat evaluasi pelaksanaan bulan ${targetMonth}`}
-                                    >
-                                      <FileText className="w-3 h-3 text-amber-700" />
-                                      <span>{evBulanIni?.statusKeterlaksanaan ? `✓ Evaluasi (${targetMonth})` : `Evaluasi (${targetMonth})`}</span>
-                                    </button>
-
-                                    <button
-                                      type="button"
                                       onClick={() => onOpenProgramDetail(r.id)}
-                                      className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-[10px] font-bold shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
+                                      className="px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-md text-[10px] font-bold shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
+                                      title="Buka rincian pelayanan rutin"
                                     >
-                                      <span>Buka Program</span>
+                                      <span>Detail</span>
                                       <ChevronRight className="w-3 h-3" />
                                     </button>
                                   </div>
@@ -1361,30 +1759,98 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <span className="text-[9.5px] text-slate-400 font-semibold">
                           Thn {p.tahun}
                         </span>
-                        {p.evaluasi?.statusKeterlaksanaan === 'terlaksana' ? (
-                          <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 shadow-2xs">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-700" />
-                            <span>Terlaksana dan Sudah Dievaluasi</span>
-                          </span>
-                        ) : (
-                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${getStatusInfo(p.status).color}`}>
-                            {getStatusInfo(p.status).label}
-                          </span>
-                        )}
-                        {p.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana' && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
-                            ✕ Tidak Terlaksana (Sudah Dievaluasi)
-                          </span>
-                        )}
-                        {p.evaluasi?.statusKeterlaksanaan === 'perubahan_waktu' && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
-                            ⏳ Geser Waktu (Sudah Dievaluasi)
+                        {(() => {
+                          const pSummary = getProgramExecutionSummary(p, selectedMonth);
+                          const pEv = getLatestEvaluasi(p, selectedMonth);
+                          const isBlnIniTerlaksana = typeof selectedMonth === 'number' && pEv?.statusKeterlaksanaan === 'terlaksana';
+                          if (pSummary.overallStatus === 'terlaksana_sebagian') {
+                            return (
+                              <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-teal-100 text-teal-950 border border-teal-300 flex items-center gap-1 shadow-2xs">
+                                <CheckCircle2 className="w-3 h-3 text-teal-700" />
+                                <span>Terlaksana Sebagian ({pSummary.terlaksanaMonths.length}/{pSummary.scheduledMonths.length} Bln)</span>
+                              </span>
+                            );
+                          }
+                          if (pSummary.overallStatus === 'terlaksana_penuh' || isBlnIniTerlaksana || pEv?.statusKeterlaksanaan === 'terlaksana') {
+                            return (
+                              <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 shadow-2xs">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                <span>Terlaksana dan Sudah Dievaluasi</span>
+                              </span>
+                            );
+                          }
+                          if (pSummary.overallStatus === 'tidak_terlaksana' || pEv?.statusKeterlaksanaan === 'tidak_terlaksana') {
+                            return (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
+                                ✕ Tidak Terlaksana (Sudah Dievaluasi)
+                              </span>
+                            );
+                          }
+                          if (pSummary.overallStatus === 'perubahan_waktu' || pEv?.statusKeterlaksanaan === 'perubahan_waktu') {
+                            return (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                                ⏳ Geser Waktu (Sudah Dievaluasi)
+                              </span>
+                            );
+                          }
+                          if (pSummary.rincianTidakTerlaksana.length > 0) {
+                            return (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-950 border border-amber-300">
+                                ⚠️ Sudah Dievaluasi ({pSummary.rincianTidakTerlaksana.length} Bln Batal)
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${getStatusInfo(p.status).color}`}>
+                              {getStatusInfo(p.status).label}
+                            </span>
+                          );
+                        })()}
+                        {p.tahun === 2027 && p.catatanPastorParoki && (
+                          <span
+                            className={`text-[9px] font-black px-1.5 py-0.2 rounded border flex items-center gap-1 shadow-2xs ${
+                              p.catatanPastorParoki.statusPersetujuan === 'disetujui'
+                                ? 'bg-emerald-100 text-emerald-950 border-emerald-300'
+                                : p.catatanPastorParoki.statusPersetujuan === 'disetujui_dengan_catatan'
+                                ? 'bg-amber-100 text-amber-950 border-amber-300'
+                                : p.catatanPastorParoki.statusPersetujuan === 'perlu_revisi'
+                                ? 'bg-orange-100 text-orange-950 border-orange-300'
+                                : p.catatanPastorParoki.statusPersetujuan === 'ditolak'
+                                ? 'bg-rose-100 text-rose-950 border-rose-300'
+                                : 'bg-slate-100 text-slate-800 border-slate-300'
+                            }`}
+                            title={`Catatan Dewan Pastoral Paroki: ${p.catatanPastorParoki.catatan || 'Tanpa catatan'}`}
+                          >
+                            <span>⛪ DPP:</span>
+                            <span className="capitalize">
+                              {p.catatanPastorParoki.statusPersetujuan === 'ditolak'
+                                ? 'Ditolak (Tidak Masuk Final)'
+                                : p.catatanPastorParoki.statusPersetujuan.replace(/_/g, ' ')}
+                            </span>
                           </span>
                         )}
                       </div>
-                      <h4 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-emerald-900 transition-colors mt-0.5 break-words">
+                      <h4
+                        className={`text-xs sm:text-sm font-bold group-hover:text-emerald-900 transition-colors mt-0.5 break-words ${
+                          p.tahun === 2027 && p.catatanPastorParoki?.statusPersetujuan === 'ditolak'
+                            ? 'text-rose-950 line-through decoration-rose-400'
+                            : 'text-slate-900'
+                        }`}
+                      >
                         {p.namaProgram}
                       </h4>
+                      {p.tahun === 2027 && p.catatanPastorParoki?.catatan && (
+                        <div
+                          className={`mt-1 p-1.5 rounded-lg text-[10px] flex items-start gap-1.5 border ${
+                            p.catatanPastorParoki.statusPersetujuan === 'ditolak'
+                              ? 'bg-rose-50 border-rose-200 text-rose-950'
+                              : 'bg-amber-50 border-amber-200 text-amber-950'
+                          }`}
+                        >
+                          <span className="font-black text-amber-800 shrink-0">⛪ Catatan DPP:</span>
+                          <span className="italic line-clamp-2">"{p.catatanPastorParoki.catatan}"</span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 sm:gap-4 text-[9.5px] sm:text-[10px] text-slate-500 mt-1 flex-wrap">
                         <span>👤 {p.penanggungjawab?.nama || 'Koordinator Seksi'}</span>
                         <span>•</span>
@@ -1398,20 +1864,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </button>
 
                   <div className="flex items-center gap-1.5 shrink-0 self-center">
-                    <button
-                      type="button"
-                      onClick={() => onOpenEvaluasi(p)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors flex items-center gap-1 cursor-pointer shadow-2xs ${
-                        p.evaluasi?.statusKeterlaksanaan
-                          ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
-                          : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-                      }`}
-                      title="Isi atau lihat evaluasi pelaksanaan program"
-                    >
-                      <FileText className="w-3.5 h-3.5 text-amber-700" />
-                      <span>{p.evaluasi?.statusKeterlaksanaan ? '✓ Sudah Dievaluasi' : 'Evaluasi'}</span>
-                    </button>
-
                     <button
                       type="button"
                       onClick={() => onOpenProgramDetail(p.id)}
@@ -1492,22 +1944,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <span className="text-[9px] font-bold text-indigo-700 bg-indigo-100/70 px-1.5 py-0.2 rounded border border-indigo-200">
                           🔄 Pelayanan Rutin
                         </span>
-                        {p.evaluasi?.statusKeterlaksanaan === 'terlaksana' && (
-                          <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 shadow-2xs">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-700" />
-                            <span>Terlaksana dan Sudah Dievaluasi</span>
-                          </span>
-                        )}
-                        {p.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana' && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
-                            ✕ Tidak Terlaksana (Sudah Dievaluasi)
-                          </span>
-                        )}
-                        {p.evaluasi?.statusKeterlaksanaan === 'perubahan_waktu' && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
-                            ⏳ Geser Waktu (Sudah Dievaluasi)
-                          </span>
-                        )}
+                        {(() => {
+                          const rSummary = getProgramExecutionSummary(p, selectedMonth);
+                          const rEv = getLatestEvaluasi(p, selectedMonth);
+                          const isBlnIniTerlaksana = typeof selectedMonth === 'number' && rEv?.statusKeterlaksanaan === 'terlaksana';
+                          if (rSummary.overallStatus === 'terlaksana_sebagian') {
+                            return (
+                              <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-teal-100 text-teal-950 border border-teal-300 flex items-center gap-1 shadow-2xs">
+                                <CheckCircle2 className="w-3 h-3 text-teal-700" />
+                                <span>Terlaksana Sebagian ({rSummary.terlaksanaMonths.length}/{rSummary.scheduledMonths.length} Bln)</span>
+                              </span>
+                            );
+                          }
+                          if (rSummary.overallStatus === 'terlaksana_penuh' || isBlnIniTerlaksana || rEv?.statusKeterlaksanaan === 'terlaksana') {
+                            return (
+                              <span className="text-[9px] font-extrabold px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 shadow-2xs">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                <span>Terlaksana dan Sudah Dievaluasi</span>
+                              </span>
+                            );
+                          }
+                          if (rSummary.overallStatus === 'tidak_terlaksana' || rEv?.statusKeterlaksanaan === 'tidak_terlaksana') {
+                            return (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
+                                ✕ Tidak Terlaksana (Sudah Dievaluasi)
+                              </span>
+                            );
+                          }
+                          if (rSummary.overallStatus === 'perubahan_waktu' || rEv?.statusKeterlaksanaan === 'perubahan_waktu') {
+                            return (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                                ⏳ Geser Waktu (Sudah Dievaluasi)
+                              </span>
+                            );
+                          }
+                          if (rSummary.rincianTidakTerlaksana.length > 0) {
+                            return (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-950 border border-amber-300">
+                                ⚠️ Sudah Dievaluasi ({rSummary.rincianTidakTerlaksana.length} Bln Batal)
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
                       </div>
 
                       <h4 className="text-xs sm:text-sm font-bold text-slate-900 mt-1 break-words">
@@ -1537,24 +2016,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
                     <button
                       type="button"
-                      onClick={() => onOpenEvaluasi(p)}
-                      className={`px-2.5 py-1.5 rounded-lg font-bold text-[10px] border transition-colors flex items-center gap-1 shadow-2xs cursor-pointer ${
-                        p.evaluasi?.statusKeterlaksanaan
-                          ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
-                          : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-                      }`}
-                      title="Isi atau lihat evaluasi pelaksanaan program"
-                    >
-                      <FileText className="w-3 h-3 text-amber-700" />
-                      <span>{p.evaluasi?.statusKeterlaksanaan ? '✓ Sudah Dievaluasi' : 'Evaluasi'}</span>
-                    </button>
-
-                    <button
-                      type="button"
                       onClick={() => onOpenProgramDetail(p.id)}
                       className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10.5px] transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                      title="Buka rincian lengkap pelayanan rutin"
                     >
-                      <span>Buka Program</span>
+                      <span>Lihat Rincian</span>
                       <ChevronRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1562,6 +2028,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               ))}
             </div>
           )}
+        </div>
+      )}
         </div>
       )}
     </div>

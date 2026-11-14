@@ -29,6 +29,7 @@ export const BudgetAnalyticsView: React.FC<BudgetAnalyticsViewProps> = ({ progra
   const sepanjangTahunCount = programs.filter((p) => p.tipeJadwal === 'sepanjang_tahun').length;
   const multiBulanCount = programs.filter((p) => p.tipeJadwal === 'multi_bulan').length;
   const satuKaliCount = programs.filter((p) => p.tipeJadwal === 'satu_kali').length;
+  const akanDitentukanCount = programs.filter((p) => p.tipeJadwal === 'akan_ditentukan').length;
 
   // Breakdown by Status
   const statusCounts = {
@@ -135,7 +136,7 @@ export const BudgetAnalyticsView: React.FC<BudgetAnalyticsViewProps> = ({ progra
           Distribusi Jadwal Pelaksanaan
         </h4>
 
-        <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
           <div className="p-3 bg-sky-50 rounded-xl border border-sky-100">
             <span className="text-[10px] font-bold text-sky-800 uppercase block">
               Sepanjang Tahun
@@ -164,6 +165,16 @@ export const BudgetAnalyticsView: React.FC<BudgetAnalyticsViewProps> = ({ progra
               {satuKaliCount}
             </span>
             <span className="text-[10px] text-amber-600 mt-0.5 block">Kegiatan Tunggal</span>
+          </div>
+
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+            <span className="text-[10px] font-bold text-slate-700 uppercase block">
+              Akan Ditentukan
+            </span>
+            <span className="text-xl font-bold text-slate-900 tabular-nums mt-1 block">
+              {akanDitentukanCount}
+            </span>
+            <span className="text-[10px] text-slate-500 mt-0.5 block">Bulan Belum Tetap</span>
           </div>
         </div>
       </div>

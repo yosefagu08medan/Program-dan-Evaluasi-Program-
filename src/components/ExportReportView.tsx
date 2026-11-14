@@ -10,6 +10,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { ProgramKerja } from '../types/proker';
+import { AuthSession } from '../types/auth';
 import dbService from '../../database';
 import {
   exportToCSV,
@@ -17,16 +18,19 @@ import {
   getTipeJadwalLabel,
   formatBulanPelaksanaan,
   getStatusInfo,
+  getAuthRoleFileSlug,
 } from '../utils/formatters';
 
 interface ExportReportViewProps {
   programs: ProgramKerja[];
+  authSession?: AuthSession | null;
   onResetData: () => void;
   onRestoreData: (restored: ProgramKerja[]) => void;
 }
 
 export const ExportReportView: React.FC<ExportReportViewProps> = ({
   programs,
+  authSession = null,
   onResetData,
   onRestoreData,
 }) => {
@@ -34,10 +38,11 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
 
   // Backup to JSON with full database metadata
   const handleExportJSON = () => {
+    const roleSlug = getAuthRoleFileSlug(authSession);
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(dbService.exportBackup());
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `backup_proker_2026_2027_${new Date().toISOString().slice(0, 10)}.json`);
+    downloadAnchor.setAttribute('download', `backup_proker_${roleSlug}_2026_2027_${new Date().toISOString().slice(0, 10)}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -77,7 +82,7 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
           {/* Download CSV / Excel */}
           <button
             type="button"
-            onClick={() => exportToCSV(programs)}
+            onClick={() => exportToCSV(programs, authSession)}
             className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100 text-emerald-900 flex items-center gap-3 transition-colors text-left"
           >
             <div className="w-10 h-10 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
@@ -224,9 +229,11 @@ export const ExportReportView: React.FC<ExportReportViewProps> = ({
                     <span className="text-[10px] text-slate-500">
                       {p.tipeJadwal === 'sepanjang_tahun'
                         ? '12 Bulan (Jan - Des)'
-                        : p.tipeJadwal === 'satu_kali'
-                        ? `Bulan ${p.bulanPelaksanaan?.[0]} ${p.tanggalSpesifik ? `(${p.tanggalSpesifik})` : ''}`
-                        : formatBulanPelaksanaan(p.bulanPelaksanaan)}
+                        : p.tipeJadwal === 'akan_ditentukan'
+                        ? (p.tanggalSpesifik || 'Bulan belum ditentukan')
+                        : p.tipeJadwal === 'satu_kali' && p.bulanPelaksanaan?.[0]
+                        ? `Bulan ${p.bulanPelaksanaan[0]} ${p.tanggalSpesifik ? `(${p.tanggalSpesifik})` : ''}`
+                        : formatBulanPelaksanaan(p.bulanPelaksanaan, p.tipeJadwal)}
                     </span>
                   </td>
                   <td className="py-2.5 px-2">

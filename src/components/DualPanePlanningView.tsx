@@ -33,6 +33,7 @@ import {
   BULAN_LIST,
   formatRupiah,
   formatCompactRupiah,
+  formatBulanPelaksanaan,
   getStatusInfo,
   getKategoriProgramInfo,
   isDivisionMatch,
@@ -151,9 +152,11 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
       return Boolean(k && k.trim().length > 0);
     }).length;
 
-    const total2027 = programs2027.length;
-    const budget2027 = programs2027.reduce((sum, p) => sum + (p.estimasiAnggaran || 0), 0);
-    const lanjutanCount = programs2027.filter((p) => Boolean(p.programLanjutanDariId || p.namaProgram2026Asal)).length;
+    const finalPrograms2027 = programs2027.filter((p) => p.catatanPastorParoki?.statusPersetujuan !== 'ditolak');
+    const total2027 = finalPrograms2027.length;
+    const budget2027 = finalPrograms2027.reduce((sum, p) => sum + (p.estimasiAnggaran || 0), 0);
+    const ditolakCount2027 = programs2027.filter((p) => p.catatanPastorParoki?.statusPersetujuan === 'ditolak').length;
+    const lanjutanCount = finalPrograms2027.filter((p) => Boolean(p.programLanjutanDariId || p.namaProgram2026Asal)).length;
 
     return {
       total2026,
@@ -162,6 +165,7 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
       kendala2026,
       total2027,
       budget2027,
+      ditolakCount2027,
       lanjutanCount,
     };
   }, [programs2026, programs2027]);
@@ -200,7 +204,11 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
     if (total <= 0) return;
     const activeMonths = tipeJadwal === 'sepanjang_tahun'
       ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      : tipeJadwal === 'akan_ditentukan'
+      ? selectedMonths
       : selectedMonths.length > 0 ? selectedMonths : [1];
+
+    if (activeMonths.length === 0) return;
 
     const perMonth = Math.round(total / activeMonths.length);
     const newMap: Record<number, number> = {};
@@ -220,7 +228,13 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
     setTargetSasaran(prog2026.targetSasaran || '');
     setEstimasiAnggaran(prog2026.estimasiAnggaran ? String(prog2026.estimasiAnggaran) : '');
     setTipeJadwal(prog2026.tipeJadwal || 'satu_kali');
-    setSelectedMonths(prog2026.bulanPelaksanaan && prog2026.bulanPelaksanaan.length > 0 ? [...prog2026.bulanPelaksanaan] : [1]);
+    setSelectedMonths(
+      prog2026.tipeJadwal === 'akan_ditentukan'
+        ? []
+        : prog2026.bulanPelaksanaan && prog2026.bulanPelaksanaan.length > 0
+        ? [...prog2026.bulanPelaksanaan]
+        : [1]
+    );
     setTanggalSpesifik(prog2026.tanggalSpesifik || '');
     setCatatanBulanan(prog2026.catatanBulanan ? { ...prog2026.catatanBulanan } : {});
     setAlokasiDanaBulanan(prog2026.alokasiDanaBulanan ? { ...prog2026.alokasiDanaBulanan } : {});
@@ -270,7 +284,13 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
     setTargetSasaran(prog2027.targetSasaran || '');
     setEstimasiAnggaran(prog2027.estimasiAnggaran ? String(prog2027.estimasiAnggaran) : '');
     setTipeJadwal(prog2027.tipeJadwal || 'satu_kali');
-    setSelectedMonths(prog2027.bulanPelaksanaan && prog2027.bulanPelaksanaan.length > 0 ? [...prog2027.bulanPelaksanaan] : [1]);
+    setSelectedMonths(
+      prog2027.tipeJadwal === 'akan_ditentukan'
+        ? []
+        : prog2027.bulanPelaksanaan && prog2027.bulanPelaksanaan.length > 0
+        ? [...prog2027.bulanPelaksanaan]
+        : [1]
+    );
     setTanggalSpesifik(prog2027.tanggalSpesifik || '');
     setCatatanBulanan(prog2027.catatanBulanan ? { ...prog2027.catatanBulanan } : {});
     setAlokasiDanaBulanan(prog2027.alokasiDanaBulanan ? { ...prog2027.alokasiDanaBulanan } : {});
@@ -324,7 +344,20 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
       targetSasaran: targetSasaran.trim(),
       estimasiAnggaran: Number(estimasiAnggaran),
       tipeJadwal,
-      bulanPelaksanaan: selectedMonths.length > 0 ? selectedMonths : [1],
+      bulanPelaksanaan:
+        tipeJadwal === 'akan_ditentukan'
+          ? []
+          : tipeJadwal === 'sepanjang_tahun'
+          ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+          : selectedMonths.length > 0
+          ? selectedMonths
+          : [1],
+      modeTanggal:
+        tipeJadwal === 'akan_ditentukan'
+          ? 'akan_ditentukan'
+          : tipeJadwal === 'sepanjang_tahun'
+          ? 'rutin_berkala'
+          : 'tanggal_pasti',
       tanggalSpesifik: tanggalSpesifik.trim() || undefined,
       catatanBulanan: Object.keys(catatanBulanan).length > 0 ? catatanBulanan : undefined,
       alokasiDanaBulanan: Object.keys(alokasiDanaBulanan).length > 0 ? alokasiDanaBulanan : undefined,
@@ -537,7 +570,7 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
                     <div className="text-[11px] text-slate-500 flex items-center gap-1.5 font-medium">
                       <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                       <span>
-                        Bulan: {p26.bulanPelaksanaan?.map((b) => BULAN_LIST[b - 1]?.singkatan).join(', ')}
+                        Bulan: {formatBulanPelaksanaan(p26.bulanPelaksanaan, p26.tipeJadwal)}
                       </span>
                       {p26.tanggalSpesifik && <span className="text-slate-400">({p26.tanggalSpesifik})</span>}
                     </div>
@@ -861,8 +894,8 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
                 <label className="block text-[11px] font-bold text-slate-700">
                   Rencana Waktu Pelaksanaan Tahun 2027:
                 </label>
-                <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-[10.5px] font-bold">
-                  {(['satu_kali', 'multi_bulan', 'sepanjang_tahun'] as const).map((t) => (
+                <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-[10.5px] font-bold">
+                  {(['satu_kali', 'multi_bulan', 'sepanjang_tahun', 'akan_ditentukan'] as const).map((t) => (
                     <button
                       key={t}
                       type="button"
@@ -870,45 +903,68 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
                         setTipeJadwal(t);
                         if (t === 'sepanjang_tahun') {
                           setSelectedMonths([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+                        } else if (t === 'akan_ditentukan') {
+                          setSelectedMonths([]);
+                          if (!tanggalSpesifik.trim()) setTanggalSpesifik('Jadwal akan ditentukan kemudian');
+                        } else if (selectedMonths.length === 0) {
+                          setSelectedMonths([1]);
                         }
                       }}
                       className={`px-2 py-1 rounded-md transition-all cursor-pointer ${
                         tipeJadwal === t ? 'bg-white text-slate-900 shadow-2xs font-extrabold' : 'text-slate-600'
                       }`}
                     >
-                      {t === 'satu_kali' ? '1x Pelaksanaan' : t === 'multi_bulan' ? 'Beberapa Bulan' : 'Rutin Setahun'}
+                      {t === 'satu_kali'
+                        ? '1x Pelaksanaan'
+                        : t === 'multi_bulan'
+                        ? 'Beberapa Bulan'
+                        : t === 'sepanjang_tahun'
+                        ? 'Rutin Setahun'
+                        : 'Akan Ditentukan'}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Bulan Pills */}
-              <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
-                {BULAN_LIST.map((bln, idx) => {
-                  const mNum = idx + 1;
-                  const isChecked = selectedMonths.includes(mNum);
-                  return (
-                    <button
-                      key={mNum}
-                      type="button"
-                      onClick={() => toggleMonth(mNum)}
-                      className={`py-1.5 px-1 rounded-lg text-center text-[10.5px] font-bold transition-all cursor-pointer ${
-                        isChecked
-                          ? 'bg-indigo-600 text-white font-black shadow-xs'
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                      }`}
-                    >
-                      {bln.singkatan}
-                    </button>
-                  );
-                })}
-              </div>
+              {tipeJadwal === 'akan_ditentukan' ? (
+                <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl text-[11px] text-amber-950 flex items-start gap-2">
+                  <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Bulan pelaksanaan tahun 2027 belum ditentukan</p>
+                    <p className="text-amber-900/90 mt-0.5">
+                      Program disimpan dengan pola <strong>Jadwal Akan Ditentukan Kemudian</strong>. Bulan pelaksanaan dapat diisi nanti saat jadwal sudah pasti.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                /* Bulan Pills */
+                <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
+                  {BULAN_LIST.map((bln, idx) => {
+                    const mNum = idx + 1;
+                    const isChecked = selectedMonths.includes(mNum);
+                    return (
+                      <button
+                        key={mNum}
+                        type="button"
+                        onClick={() => toggleMonth(mNum)}
+                        className={`py-1.5 px-1 rounded-lg text-center text-[10.5px] font-bold transition-all cursor-pointer ${
+                          isChecked
+                            ? 'bg-indigo-600 text-white font-black shadow-xs'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        {bln.singkatan}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               <input
                 type="text"
                 value={tanggalSpesifik}
                 onChange={(e) => setTanggalSpesifik(e.target.value)}
-                placeholder="Rencana tanggal spesifik (opsional, misal: Setiap Minggu ke-2, atau 15 Agustus 2027)"
+                placeholder="Rencana tanggal spesifik / keterangan waktu (opsional, misal: Setiap Minggu ke-2, 15 Agustus 2027, atau Akan ditentukan kemudian)"
                 className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:border-indigo-600 focus:bg-white mt-1"
               />
 
@@ -916,15 +972,13 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
               {(() => {
                 const activeMonths = tipeJadwal === 'sepanjang_tahun'
                   ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+                  : tipeJadwal === 'akan_ditentukan'
+                  ? []
                   : selectedMonths.length > 0 ? selectedMonths : [1];
 
+                if (activeMonths.length === 0) return null;
+
                 const totalBudget = Number(estimasiAnggaran) || 0;
-                const allocatedTotal = activeMonths.reduce((sum, m) => {
-                  const val = alokasiDanaBulanan[m] !== undefined
-                    ? alokasiDanaBulanan[m]
-                    : (totalBudget > 0 ? Math.round(totalBudget / activeMonths.length) : 0);
-                  return sum + val;
-                }, 0);
 
                 return (
                   <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2.5 mt-2">
@@ -1085,14 +1139,66 @@ export const DualPanePlanningView: React.FC<DualPanePlanningViewProps> = ({
                             Baru
                           </span>
                         )}
-                        <h5 className="text-xs font-extrabold text-slate-900 truncate">
+                        {p27.catatanPastorParoki && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-black border flex items-center gap-1 ${
+                              p27.catatanPastorParoki.statusPersetujuan === 'disetujui'
+                                ? 'bg-emerald-100 text-emerald-950 border-emerald-300'
+                                : p27.catatanPastorParoki.statusPersetujuan === 'disetujui_dengan_catatan'
+                                ? 'bg-amber-100 text-amber-950 border-amber-300'
+                                : p27.catatanPastorParoki.statusPersetujuan === 'perlu_revisi'
+                                ? 'bg-orange-100 text-orange-950 border-orange-300'
+                                : 'bg-rose-100 text-rose-950 border-rose-300'
+                            }`}
+                          >
+                            <span>⛪ DPP:</span>
+                            <span className="capitalize">
+                              {p27.catatanPastorParoki.statusPersetujuan === 'ditolak'
+                                ? 'Ditolak (Batal Masuk Final)'
+                                : p27.catatanPastorParoki.statusPersetujuan.replace(/_/g, ' ')}
+                            </span>
+                          </span>
+                        )}
+                        <h5
+                          className={`text-xs font-extrabold truncate ${
+                            p27.catatanPastorParoki?.statusPersetujuan === 'ditolak'
+                              ? 'text-rose-950 line-through decoration-rose-400'
+                              : 'text-slate-900'
+                          }`}
+                        >
                           {p27.namaProgram}
                         </h5>
                       </div>
                       <div className="text-[10.5px] text-slate-500 font-medium">
-                        Bulan: {p27.bulanPelaksanaan?.map((b) => BULAN_LIST[b - 1]?.singkatan).join(', ')} ·{' '}
+                        Bulan: {formatBulanPelaksanaan(p27.bulanPelaksanaan, p27.tipeJadwal)} ·{' '}
                         <strong className="text-slate-800">{formatRupiah(p27.estimasiAnggaran)}</strong>
+                        {p27.catatanPastorParoki?.statusPersetujuan === 'ditolak' && (
+                          <span className="ml-2 font-bold text-rose-600">
+                            (Tidak Dihitung di Pagu Final)
+                          </span>
+                        )}
                       </div>
+
+                      {/* Catatan Dewan Pastoral Paroki 2027 */}
+                      {p27.catatanPastorParoki?.catatan && (
+                        <div
+                          className={`mt-1 p-2 rounded-md border text-[9.5px] ${
+                            p27.catatanPastorParoki.statusPersetujuan === 'ditolak'
+                              ? 'bg-rose-50 border-rose-200 text-rose-950'
+                              : 'bg-amber-50 border-amber-200 text-amber-950'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1 font-black mb-0.5">
+                            <span>⛪ Catatan Dewan Pastoral Paroki:</span>
+                            {p27.catatanPastorParoki.statusPersetujuan === 'ditolak' && (
+                              <span className="text-[9px] px-1 bg-rose-200 text-rose-900 rounded font-black">
+                                Tidak Masuk Program Final
+                              </span>
+                            )}
+                          </div>
+                          <p className="italic leading-relaxed">"{p27.catatanPastorParoki.catatan}"</p>
+                        </div>
+                      )}
 
                       {/* Catatan Per Bulan 2027 jika ada */}
                       {p27.catatanBulanan && Object.keys(p27.catatanBulanan).length > 0 && (

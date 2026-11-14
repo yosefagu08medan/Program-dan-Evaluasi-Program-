@@ -18,6 +18,7 @@ import {
   Building,
   Coins,
   Plus,
+  Target,
 } from 'lucide-react';
 import {
   PenerimaanMingguan,
@@ -30,6 +31,9 @@ import {
   getAllPsePenerimaanOptions,
   savePseCustomPenerimaanOption,
   removePseCustomPenerimaanOption,
+  isPseTargetTahunan,
+  calculatePseAnnualTargetSummary,
+  PseAnnualTargetSummary,
 } from '../types/penerimaan';
 import { ProgramKerja } from '../types/proker';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
@@ -88,14 +92,21 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
     authSession?.role === 'pastor_paroki' ||
     authSession?.role === 'semua_seksi' ||
     authSession?.unitId === 'div-dpph';
-  const isSeksiPSE =
+  const isSeksiPSE = Boolean(
     authSession?.unitNama === 'Seksi PSE' ||
     authSession?.unitId === 'div-pse' ||
-    (!isBendahara && defaultSeksiTarget === 'Seksi PSE');
+    (authSession?.unitNama && (
+      authSession.unitNama.toLowerCase().includes('pse') ||
+      authSession.unitNama.toLowerCase().includes('sosial ekonomi')
+    )) ||
+    (!isBendahara && defaultSeksiTarget === 'Seksi PSE')
+  );
   const isSeksiUser = authSession?.role === 'seksi' && !isPastorOrDpph;
 
   // Mode: 'kolekte_dual' (2 kolom: Kolekte 1 & 2) vs 'kolekte_khusus' vs 'seksi_single' (1 kolom pos seksi)
-  const [formMode, setFormMode] = useState<'kolekte_dual' | 'kolekte_khusus' | 'seksi_single'>('kolekte_dual');
+  const [formMode, setFormMode] = useState<'kolekte_dual' | 'kolekte_khusus' | 'seksi_single'>(
+    isSeksiPSE ? 'seksi_single' : 'kolekte_dual'
+  );
 
   // Periode Bersama
   const [tahun, setTahun] = useState<2026 | 2027>(defaultTahun);
@@ -134,6 +145,10 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
   const [pseOptions, setPseOptions] = useState<string[]>(() => getAllPsePenerimaanOptions());
   const [isCustomPseMode, setIsCustomPseMode] = useState<boolean>(false);
   const [customPseNama, setCustomPseNama] = useState<string>('');
+
+  // State Khusus Target Tahunan PSE (Sepanjang Tahun / Tentatif)
+  const [isTargetTahunanState, setIsTargetTahunanState] = useState<boolean>(false);
+  const [targetTahunanStr, setTargetTahunanStr] = useState<string>('50.000.000');
 
   // Status & Validasi
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -186,7 +201,11 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
     }
 
     // Tentukan mode awal
-    if (initialData?.kategori === 'kolekte_khusus' || defaultKategori === 'kolekte_khusus') {
+    if (isSeksiPSE) {
+      setFormMode('seksi_single');
+      setSeksiAlokasi('Seksi PSE');
+      setSeksiTipeSumber('seksi_tetap');
+    } else if (initialData?.kategori === 'kolekte_khusus' || defaultKategori === 'kolekte_khusus') {
       setFormMode('kolekte_khusus');
       setKhususNama(initialData?.namaPenerimaan || defaultNamaPenerimaan || 'Kolekte Khusus Misa Hari Raya');
       setKhususRencanaStr(initialData?.rancangan ? initialData.rancangan.toLocaleString('id-ID') : defaultRancangan ? defaultRancangan.toLocaleString('id-ID') : '8.000.000');
@@ -200,7 +219,7 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
 
       const shouldBeSeksiMode =
         !isBendahara &&
-        (isSingleSeksiEdit || isSeksiPSE || isSeksiUser || modeTentatifSeksi || defaultSeksiTarget !== 'Umum Paroki');
+        (isSingleSeksiEdit || isSeksiUser || modeTentatifSeksi || defaultSeksiTarget !== 'Umum Paroki');
 
       if (shouldBeSeksiMode) {
         setFormMode('seksi_single');
@@ -246,7 +265,8 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
       setSeksiKeterangan(initialData.keterangan || '');
       setSeksiPencatat(initialData.pencatat || `Bendahara ${initialData.alokasiSeksi}`);
 
-      if (initialData.alokasiSeksi === 'Seksi PSE' || isSeksiPSE) {
+      const isTargetPSE = initialData.alokasiSeksi === 'Seksi PSE' || isSeksiPSE;
+      if (isTargetPSE) {
         if (initialData.namaPenerimaan && !currentAllPse.includes(initialData.namaPenerimaan)) {
           setIsCustomPseMode(true);
           setCustomPseNama(initialData.namaPenerimaan);
@@ -255,15 +275,47 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
           setCustomPseNama('');
         }
       }
+
+      // Inisialisasi status target tahunan
+      const isSolidaritas = Boolean(
+        initialData.isTargetTahunan ||
+        isPseTargetTahunan(initialData) ||
+        (isTargetPSE && (initialData.namaPenerimaan?.toLowerCase().includes('solidaritas') || false))
+      );
+      setIsTargetTahunanState(isSolidaritas);
+
+      const annualSummary = calculatePseAnnualTargetSummary(
+        penerimaanList,
+        targetTahun,
+        initialData.namaPenerimaan || 'Dana Solidaritas Umat'
+      );
+      const initAnnualTarget =
+        initialData.targetTahunan ||
+        (initialData.isTargetTahunan && initialData.rancangan ? initialData.rancangan : undefined) ||
+        (annualSummary.targetTahunan > 0 ? annualSummary.targetTahunan : 50000000);
+      setTargetTahunanStr(initAnnualTarget.toLocaleString('id-ID'));
     } else {
       if (isSeksiPSE) {
         setSeksiAlokasi('Seksi PSE');
         setSeksiTipeSumber('seksi_tetap');
         setSeksiKategori(defaultKategori || 'persembahan_umat');
-        setSeksiNama(defaultNamaPenerimaan || 'Dana Solidaritas Umat');
+        const chosenNama = defaultNamaPenerimaan || 'Dana Solidaritas Umat';
+        setSeksiNama(chosenNama);
         setSeksiPencatat('Bendahara Seksi PSE');
         setIsCustomPseMode(false);
         setCustomPseNama('');
+
+        const isSolidaritas = chosenNama.toLowerCase().includes('solidaritas');
+        setIsTargetTahunanState(isSolidaritas);
+
+        const annualSummary = calculatePseAnnualTargetSummary(
+          penerimaanList,
+          targetTahun,
+          chosenNama
+        );
+        const initAnnualTarget =
+          annualSummary.targetTahunan > 0 ? annualSummary.targetTahunan : 50000000;
+        setTargetTahunanStr(initAnnualTarget.toLocaleString('id-ID'));
       } else {
         const target =
           authSession?.unitNama && authSession.unitNama !== 'all' && authSession.unitNama !== 'Umum Paroki'
@@ -278,6 +330,8 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
         setSeksiPencatat(`Bendahara ${target}`);
         setIsCustomPseMode(false);
         setCustomPseNama('');
+        setIsTargetTahunanState(false);
+        setTargetTahunanStr('50.000.000');
       }
       setSeksiRencanaStr(defaultRancangan && !['kolekte_1', 'kolekte_2', 'kolekte_khusus'].includes(defaultKategori || '') ? defaultRancangan.toLocaleString('id-ID') : '3.000.000');
       setSeksiRealisasiStr(defaultRealisasi && !['kolekte_1', 'kolekte_2', 'kolekte_khusus'].includes(defaultKategori || '') ? defaultRealisasi.toLocaleString('id-ID') : '');
@@ -302,6 +356,7 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
     isSeksiPSE,
     isSeksiUser,
     authSession,
+    penerimaanList,
   ]);
 
   // Live calculations untuk Kolom Kolekte I (Aturan 50:50)
@@ -330,6 +385,31 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
   const seksiRealisasiNum = parseRupiahInput(seksiRealisasiStr);
   const seksiSelisih = seksiRealisasiNum - seksiRencanaNum;
   const seksiPersen = seksiRencanaNum > 0 ? Math.round((seksiRealisasiNum / seksiRencanaNum) * 100) : 0;
+
+  // Live calculations untuk Target Tahunan PSE
+  const targetTahunanNum = parseRupiahInput(targetTahunanStr);
+  const effectiveTargetTahunan = targetTahunanNum > 0 ? targetTahunanNum : 50000000;
+
+  const currentPseNama = (isCustomPseMode ? customPseNama : seksiNama) || 'Dana Solidaritas Umat';
+  const pseAnnualSummary = useMemo(() => {
+    return calculatePseAnnualTargetSummary(penerimaanList, tahun, currentPseNama);
+  }, [penerimaanList, tahun, currentPseNama]);
+
+  // Realisasi bulan-bulan lain di tahun yang sama (kecuali item yang sedang diedit ini)
+  const otherMonthsRealization = useMemo(() => {
+    const currentItemReal = initialData?.realisasi || 0;
+    return Math.max(0, pseAnnualSummary.totalRealisasiTahunan - currentItemReal);
+  }, [pseAnnualSummary.totalRealisasiTahunan, initialData]);
+
+  // Live akumulasi realisasi tahunan (bulan lain + bulan yang sedang diinput saat ini)
+  const liveTotalRealisasiTahunan = otherMonthsRealization + seksiRealisasiNum;
+  const liveSisaTargetTahunan = Math.max(0, effectiveTargetTahunan - liveTotalRealisasiTahunan);
+  const liveSurplusTahunan = Math.max(0, liveTotalRealisasiTahunan - effectiveTargetTahunan);
+  const isSurplusTahunan = liveTotalRealisasiTahunan >= effectiveTargetTahunan;
+  const livePersentaseTahunan =
+    effectiveTargetTahunan > 0
+      ? Math.round((liveTotalRealisasiTahunan / effectiveTargetTahunan) * 100)
+      : 0;
 
   // Form Handlers
   const handleKol1RencanaChange = (val: string) => {
@@ -410,6 +490,16 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
     }
     const num = parseInt(clean, 10);
     setSeksiRealisasiStr(num.toLocaleString('id-ID'));
+  };
+
+  const handleTargetTahunanChange = (val: string) => {
+    const clean = val.replace(/\D/g, '');
+    if (!clean) {
+      setTargetTahunanStr('');
+      return;
+    }
+    const num = parseInt(clean, 10);
+    setTargetTahunanStr(num.toLocaleString('id-ID'));
   };
 
   // Submit Handler
@@ -561,6 +651,7 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
         }
 
         const isTentatif =
+          isTargetTahunanState ||
           seksiTipeSumber === 'seksi_tentatif' ||
           (seksiAlokasi !== 'Umum Paroki' && !isSeksiTetap(seksiAlokasi));
 
@@ -572,8 +663,10 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
           tanggal: tanggal || `${tahun}-${String(bulan).padStart(2, '0')}-01`,
           kategori: seksiKategori,
           namaPenerimaan: finalNama,
-          rancangan: seksiRencanaNum,
+          rancangan: isTargetTahunanState ? 0 : seksiRencanaNum, // Untuk target tahunan, rancangan bulanan diset 0 agar tidak melipatgandakan target 12 kali
           realisasi: seksiRealisasiNum,
+          isTargetTahunan: isTargetTahunanState,
+          targetTahunan: isTargetTahunanState ? targetTahunanNum : undefined,
           alokasiSeksi: seksiAlokasi || 'Seksi PSE',
           tipeSumber: seksiTipeSumber,
           isTentatif,
@@ -601,33 +694,46 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
       <div className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[92vh]">
         {/* Header Modal */}
-        <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-indigo-900 text-white px-5 sm:px-7 py-4.5 flex items-center justify-between shrink-0 shadow-sm">
+        <div className={`px-5 sm:px-7 py-4.5 flex items-center justify-between shrink-0 shadow-sm text-white ${
+          isSeksiPSE
+            ? 'bg-gradient-to-r from-amber-800 via-orange-800 to-slate-900'
+            : 'bg-gradient-to-r from-emerald-800 via-teal-800 to-indigo-900'
+        }`}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center backdrop-blur-xs shadow-inner">
-              <DollarSign className="w-5 h-5 text-emerald-200" />
+              {isSeksiPSE ? <Heart className="w-5 h-5 text-amber-200" /> : <DollarSign className="w-5 h-5 text-emerald-200" />}
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base sm:text-lg font-black tracking-tight">
-                  {initialData
+                  {isSeksiPSE
+                    ? (initialData ? 'Edit Penerimaan Dana Kasih Seksi PSE' : 'Input Penerimaan Dana Kasih Seksi PSE')
+                    : initialData
                     ? 'Edit Rencana & Realisasi Penerimaan'
                     : formMode === 'kolekte_dual'
                     ? 'Input Rencana & Realisasi 2 Kolom (Kolekte I & Kolekte II)'
                     : `Input Penerimaan ${seksiAlokasi}`}
                 </h3>
+                {isSeksiPSE && (
+                  <span className="px-2 py-0.5 rounded-full text-[9.5px] font-black bg-amber-300 text-amber-950">
+                    Seksi PSE Mandiri
+                  </span>
+                )}
                 {isBendahara && (
                   <span className="px-2 py-0.5 rounded-full text-[9.5px] font-black bg-blue-200 text-blue-950">
                     💰 Khusus Kolekte
                   </span>
                 )}
-                {formMode === 'kolekte_dual' && (
+                {!isSeksiPSE && formMode === 'kolekte_dual' && (
                   <span className="px-2 py-0.5 rounded-full text-[9.5px] font-black bg-emerald-300 text-emerald-950">
                     ⚖️ 2 Kolom Side-by-Side
                   </span>
                 )}
               </div>
               <p className="text-xs text-emerald-100/90 font-medium mt-0.5">
-                {formMode === 'kolekte_dual'
+                {isSeksiPSE
+                  ? 'Perencanaan dan pencatatan dana kasih umat (APP, Amplop Natal, Dana Solidaritas Umat, dsb.)'
+                  : formMode === 'kolekte_dual'
                   ? 'Input langsung 2 kolom: Kolekte 1 otomatis dibagi 50:50 (Solidaritas & Operasional/Proker), Kolekte 2 dialokasikan 100% Pembangunan'
                   : 'Pencatatan pos penerimaan khusus karya sosial seksi PSE atau usaha dana seksi'}
               </p>
@@ -642,49 +748,61 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
           </button>
         </div>
 
-        {/* Tab Switcher: 2 Kolom Kolekte vs Kolekte Khusus vs Mode Seksi */}
-        <div className="px-5 sm:px-7 pt-3 pb-1 bg-slate-50 border-b border-slate-200 flex items-center gap-2 shrink-0 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setFormMode('kolekte_dual')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-              formMode === 'kolekte_dual'
-                ? 'bg-emerald-700 text-white shadow-xs'
-                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
-            }`}
-          >
-            <Split className="w-3.5 h-3.5" />
-            <span>🏛️ Kolekte I &amp; II (2 Kolom)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setFormMode('kolekte_khusus')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-              formMode === 'kolekte_khusus'
-                ? 'bg-purple-700 text-white shadow-xs'
-                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
-            }`}
-          >
-            <Coins className="w-3.5 h-3.5 text-purple-400" />
-            <span>🪙 Kolekte Khusus (Hari Raya)</span>
-          </button>
-
-          {!isBendahara && (
+        {/* Tab Switcher: KHUSUS PSE TIDAK DITAMPILKAN TAB KOLEKTE */}
+        {isSeksiPSE ? (
+          <div className="px-5 sm:px-7 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs font-bold text-amber-950">
+            <div className="flex items-center gap-2">
+              <Heart className="w-4 h-4 text-amber-600 fill-amber-500" />
+              <span>Input Penerimaan Dana Kasih Seksi PSE (APP, Amplop Natal, Kotak Solidaritas)</span>
+            </div>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-black">
+              Kelola Mandiri PSE
+            </span>
+          </div>
+        ) : (
+          <div className="px-5 sm:px-7 pt-3 pb-1 bg-slate-50 border-b border-slate-200 flex items-center gap-2 shrink-0 flex-wrap">
             <button
               type="button"
-              onClick={() => setFormMode('seksi_single')}
+              onClick={() => setFormMode('kolekte_dual')}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
-                formMode === 'seksi_single'
-                  ? 'bg-amber-600 text-white shadow-xs'
+                formMode === 'kolekte_dual'
+                  ? 'bg-emerald-700 text-white shadow-xs'
                   : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
               }`}
             >
-              <Heart className="w-3.5 h-3.5" />
-              <span>⭐ Penerimaan Seksi (PSE / Tentatif)</span>
+              <Split className="w-3.5 h-3.5" />
+              <span>🏛️ Kolekte I &amp; II (2 Kolom)</span>
             </button>
-          )}
-        </div>
+
+            <button
+              type="button"
+              onClick={() => setFormMode('kolekte_khusus')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                formMode === 'kolekte_khusus'
+                  ? 'bg-purple-700 text-white shadow-xs'
+                  : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+              }`}
+            >
+              <Coins className="w-3.5 h-3.5 text-purple-400" />
+              <span>🪙 Kolekte Khusus (Hari Raya)</span>
+            </button>
+
+            {!isBendahara && (
+              <button
+                type="button"
+                onClick={() => setFormMode('seksi_single')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                  formMode === 'seksi_single'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+                }`}
+              >
+                <Heart className="w-3.5 h-3.5" />
+                <span>⭐ Penerimaan Seksi (PSE / Tentatif)</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Form Body Scrollable */}
         <form onSubmit={handleSubmit} className="p-5 sm:p-7 space-y-4 overflow-y-auto grow">
@@ -1388,6 +1506,9 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
                           onClick={() => {
                             setIsCustomPseMode(false);
                             setSeksiNama(opt);
+                            if (opt.toLowerCase().includes('solidaritas')) {
+                              setIsTargetTahunanState(true);
+                            }
                           }}
                         >
                           <span>{opt}</span>
@@ -1485,54 +1606,249 @@ export const PenerimaanFormModal: React.FC<PenerimaanFormModalProps> = ({
                 </div>
               )}
 
-              {/* 2 Kotak: Rencana vs Realisasi Seksi */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="bg-white p-3 rounded-xl border border-amber-300 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-black uppercase tracking-wider text-amber-900">
-                      1. Target Rencana Penerimaan (Rp) *
-                    </label>
-                    <span className="text-[9.5px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
-                      Rancangan
-                    </span>
+              {/* Opsi Target Tahunan (Khusus PSE / Dana Solidaritas Umat Sepanjang Tahun Tentatif) */}
+              {(isSeksiPSE || seksiAlokasi === 'Seksi PSE') && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-amber-100/80 rounded-xl border border-amber-300 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-amber-800 shrink-0" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-amber-950">
+                          Format Target: {isTargetTahunanState ? 'Target Tahunan (Sepanjang Tahun)' : 'Target Bulanan'}
+                        </span>
+                        {isTargetTahunanState && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-300 text-amber-950">
+                            Tentatif Sepanjang Tahun
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10.5px] text-amber-900 leading-tight mt-0.5">
+                        {isTargetTahunanState
+                          ? 'Target berlaku untuk 1 tahun penuh. Realisasi penerimaan di bulan berapa saja akan otomatis mengurangi target secara tahunan.'
+                          : 'Target dihitung per bulan terpisah (bukan akumulasi tahunan).'}
+                      </p>
+                    </div>
                   </div>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">Rp</span>
-                    <input
-                      type="text"
-                      value={seksiRencanaStr}
-                      onChange={(e) => handleSeksiRencanaChange(e.target.value)}
-                      placeholder="0"
-                      className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-black text-slate-900 focus:outline-none focus:border-amber-600 focus:bg-white"
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsTargetTahunanState(!isTargetTahunanState)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer shrink-0 ${
+                      isTargetTahunanState
+                        ? 'bg-amber-700 text-white shadow-xs'
+                        : 'bg-white text-slate-700 hover:text-slate-900 border border-slate-300'
+                    }`}
+                  >
+                    {isTargetTahunanState ? '✓ Mode Target Tahunan Aktif' : 'Ganti ke Target Tahunan'}
+                  </button>
                 </div>
+              )}
 
-                <div className="bg-white p-3 rounded-xl border border-amber-300 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-black uppercase tracking-wider text-amber-900">
-                      2. Realisasi Penerimaan (Rp)
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setSeksiRealisasiStr(seksiRencanaStr)}
-                      className="text-[9.5px] font-bold text-amber-700 bg-amber-100 hover:bg-amber-200 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
-                    >
-                      📋 Samakan Rencana
-                    </button>
+              {/* Input Nominal: Mode Target Tahunan vs Target Bulanan Biasa */}
+              {isTargetTahunanState ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* 1. Target Rencana Tahunan (Rp / Tahun) */}
+                    <div className="bg-white p-3.5 rounded-xl border-2 border-amber-400 space-y-2 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-amber-950 flex items-center gap-1">
+                          <Target className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Target Rencana Pertahun (Rp / Tahun) *</span>
+                        </label>
+                        <span className="text-[9.5px] font-black text-amber-900 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
+                          🗓️ 1 Tahun Penuh
+                        </span>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">Rp</span>
+                        <input
+                          type="text"
+                          value={targetTahunanStr}
+                          onChange={(e) => handleTargetTahunanChange(e.target.value)}
+                          placeholder="50.000.000"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-black text-slate-900 focus:outline-none focus:border-amber-600 focus:bg-white"
+                        />
+                      </div>
+                      {/* Presets Target Pertahun */}
+                      <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
+                        <span className="text-[9.5px] text-slate-400 font-bold">Preset:</span>
+                        {[25000000, 50000000, 75000000, 100000000].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setTargetTahunanStr(preset.toLocaleString('id-ID'))}
+                            className="px-2 py-0.5 rounded bg-amber-50 hover:bg-amber-100 text-amber-950 text-[9.5px] font-bold border border-amber-200 transition-colors cursor-pointer"
+                          >
+                            {preset / 1000000} Jt/Thn
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-500 font-medium leading-tight">
+                        Target penerimaan untuk 1 tahun penuh. Realisasi penerimaan di bulan berapa saja akan otomatis mengurangi sisa target ini.
+                      </p>
+                    </div>
+
+                    {/* 2. Realisasi Bulan Ini */}
+                    <div className="bg-white p-3.5 rounded-xl border-2 border-emerald-400 space-y-2 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-black uppercase tracking-wider text-emerald-950 flex items-center gap-1">
+                          <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Realisasi Kas Masuk Bulan Ini (Rp)</span>
+                        </label>
+                        <span className="text-[9.5px] font-black text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                          Bulan {BULAN_LIST.find((b) => b.no === bulan)?.nama || bulan}
+                        </span>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">Rp</span>
+                        <input
+                          type="text"
+                          value={seksiRealisasiStr}
+                          onChange={(e) => handleSeksiRealisasiChange(e.target.value)}
+                          placeholder="0 (Belum ada dana masuk di bulan ini)"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-black text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-500 font-medium leading-tight">
+                        Nominal dana solidaritas yang riil diterima pada bulan {BULAN_LIST.find((b) => b.no === bulan)?.nama || bulan}.
+                      </p>
+                    </div>
                   </div>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">Rp</span>
-                    <input
-                      type="text"
-                      value={seksiRealisasiStr}
-                      onChange={(e) => handleSeksiRealisasiChange(e.target.value)}
-                      placeholder="0"
-                      className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-black text-slate-900 focus:outline-none focus:border-amber-600 focus:bg-white"
-                    />
+
+                  {/* KOTAK LIVE DEDUKSI TARGET TAHUNAN SECARA REAL-TIME */}
+                  <div className="p-3.5 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-100/70 rounded-2xl border-2 border-amber-300 shadow-2xs space-y-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-black text-amber-950 flex items-center gap-1.5">
+                        <TrendingUp className="w-4 h-4 text-amber-600" />
+                        <span>Kalkulasi Deduksi Target Tahunan (Live Real-Time)</span>
+                      </span>
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
+                        {livePersentaseTahunan}% Terkumpul
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      {/* Target Tahunan */}
+                      <div className="bg-white p-2.5 rounded-xl border border-amber-200">
+                        <span className="text-[9.5px] text-slate-400 font-bold uppercase block">
+                          Target 1 Tahun:
+                        </span>
+                        <strong className="text-xs sm:text-sm font-black text-slate-900">
+                          {formatRupiah(effectiveTargetTahunan)}
+                        </strong>
+                        <span className="text-[8.5px] text-slate-400 block">Pagu Tahunan</span>
+                      </div>
+
+                      {/* Realisasi Bulan Ini */}
+                      <div className="bg-white p-2.5 rounded-xl border border-amber-200">
+                        <span className="text-[9.5px] text-slate-400 font-bold uppercase block">
+                          Masuk Bulan Ini:
+                        </span>
+                        <strong className="text-xs sm:text-sm font-black text-emerald-700">
+                          {formatRupiah(seksiRealisasiNum)}
+                        </strong>
+                        <span className="text-[8.5px] text-slate-400 block">
+                          Bulan {BULAN_LIST.find((b) => b.no === bulan)?.nama || bulan}
+                        </span>
+                      </div>
+
+                      {/* Total Realisasi Kumulatif */}
+                      <div className="bg-white p-2.5 rounded-xl border border-amber-200">
+                        <span className="text-[9.5px] text-slate-400 font-bold uppercase block">
+                          Total Realisasi Kumulatif:
+                        </span>
+                        <strong className="text-xs sm:text-sm font-black text-amber-900">
+                          {formatRupiah(liveTotalRealisasiTahunan)}
+                        </strong>
+                        <span className="text-[8.5px] text-slate-400 block">
+                          {otherMonthsRealization > 0 ? `+${formatRupiah(otherMonthsRealization)} bln lain` : 'Sepanjang tahun'}
+                        </span>
+                      </div>
+
+                      {/* Sisa Target Tahunan (Mengurangi Target) */}
+                      <div className={`p-2.5 rounded-xl border ${
+                        isSurplusTahunan
+                          ? 'bg-emerald-100/80 border-emerald-300 text-emerald-950'
+                          : 'bg-amber-200/80 border-amber-400 text-amber-950'
+                      }`}>
+                        <span className="text-[9.5px] font-black uppercase block tracking-wider">
+                          {isSurplusTahunan ? '✓ Surplus Target:' : '⚡ Sisa Target Tahunan:'}
+                        </span>
+                        <strong className="text-xs sm:text-sm font-black block">
+                          {isSurplusTahunan ? `+${formatRupiah(liveSurplusTahunan)}` : formatRupiah(liveSisaTargetTahunan)}
+                        </strong>
+                        <span className="text-[8.5px] font-bold block">
+                          {isSurplusTahunan ? 'Target tercapai 100%' : 'Otomatis Berkurang'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="space-y-1 pt-1">
+                      <div className="w-full h-2 rounded-full bg-amber-200 overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-300 rounded-full ${
+                            isSurplusTahunan ? 'bg-emerald-600' : 'bg-gradient-to-r from-amber-500 to-amber-600'
+                          }`}
+                          style={{ width: `${Math.min(100, Math.max(0, livePersentaseTahunan))}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[9.5px] text-amber-900 font-bold">
+                        <span>Realisasi di bulan apa pun langsung mengurangi target tahunan.</span>
+                        <span>{livePersentaseTahunan}% / 100%</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                /* 2 Kotak: Rencana vs Realisasi Seksi Bulanan Biasa */
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="bg-white p-3 rounded-xl border border-amber-300 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black uppercase tracking-wider text-amber-900">
+                        1. Target Rencana Penerimaan (Rp) *
+                      </label>
+                      <span className="text-[9.5px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                        Rancangan Bulanan
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">Rp</span>
+                      <input
+                        type="text"
+                        value={seksiRencanaStr}
+                        onChange={(e) => handleSeksiRencanaChange(e.target.value)}
+                        placeholder="0"
+                        className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-black text-slate-900 focus:outline-none focus:border-amber-600 focus:bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-3 rounded-xl border border-amber-300 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black uppercase tracking-wider text-amber-900">
+                        2. Realisasi Penerimaan (Rp)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setSeksiRealisasiStr(seksiRencanaStr)}
+                        className="text-[9.5px] font-bold text-amber-700 bg-amber-100 hover:bg-amber-200 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                      >
+                        📋 Samakan Rencana
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">Rp</span>
+                      <input
+                        type="text"
+                        value={seksiRealisasiStr}
+                        onChange={(e) => handleSeksiRealisasiChange(e.target.value)}
+                        placeholder="0"
+                        className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-black text-slate-900 focus:outline-none focus:border-amber-600 focus:bg-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Tautkan ke Program Kerja Seksi (Opsional) */}
               <div>

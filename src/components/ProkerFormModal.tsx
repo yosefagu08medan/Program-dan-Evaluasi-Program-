@@ -102,17 +102,25 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
   // Handle tipe jadwal change
   const handleTipeJadwalChange = (type: ScheduleType) => {
     setTipeJadwal(type);
+    setErrors((prev) => ({ ...prev, bulanPelaksanaan: '' }));
     if (type === 'sepanjang_tahun') {
       setBulanPelaksanaan([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     } else if (type === 'satu_kali') {
       // If currently multi or empty, keep only first active or default to current month
       const current = bulanPelaksanaan.length > 0 ? [bulanPelaksanaan[0]] : [1];
       setBulanPelaksanaan(current);
+      if (tanggalSpesifik === 'Jadwal akan ditentukan kemudian') setTanggalSpesifik('');
+    } else if (type === 'akan_ditentukan') {
+      setBulanPelaksanaan([]);
+      if (!tanggalSpesifik.trim()) {
+        setTanggalSpesifik('Jadwal akan ditentukan kemudian');
+      }
     } else {
       // Multi-bulan: default if empty
       if (bulanPelaksanaan.length === 0 || bulanPelaksanaan.length === 12) {
         setBulanPelaksanaan([3, 6, 9, 11]);
       }
+      if (tanggalSpesifik === 'Jadwal akan ditentukan kemudian') setTanggalSpesifik('');
     }
   };
 
@@ -155,7 +163,9 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
     if (!tujuanKegiatan.trim()) newErrors.tujuanKegiatan = 'Tujuan kegiatan wajib diisi';
     if (!targetSasaran.trim()) newErrors.targetSasaran = 'Target sasaran wajib diisi';
     if (!pjNama.trim()) newErrors.pjNama = 'Nama penanggung jawab wajib diisi';
-    if (bulanPelaksanaan.length === 0) newErrors.bulanPelaksanaan = 'Pilih minimal 1 bulan pelaksanaan';
+    if (tipeJadwal !== 'akan_ditentukan' && bulanPelaksanaan.length === 0) {
+      newErrors.bulanPelaksanaan = 'Pilih minimal 1 bulan pelaksanaan';
+    }
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -170,8 +180,22 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
         targetSasaran: targetSasaran.trim(),
         estimasiAnggaran,
         tipeJadwal,
-        bulanPelaksanaan: tipeJadwal === 'sepanjang_tahun' ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] : bulanPelaksanaan,
-        tanggalSpesifik: tipeJadwal === 'satu_kali' ? tanggalSpesifik.trim() : undefined,
+        bulanPelaksanaan:
+          tipeJadwal === 'sepanjang_tahun'
+            ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            : tipeJadwal === 'akan_ditentukan'
+            ? []
+            : bulanPelaksanaan,
+        modeTanggal:
+          tipeJadwal === 'akan_ditentukan'
+            ? 'akan_ditentukan'
+            : tipeJadwal === 'sepanjang_tahun'
+            ? 'rutin_berkala'
+            : 'tanggal_pasti',
+        tanggalSpesifik:
+          tipeJadwal === 'satu_kali' || tipeJadwal === 'akan_ditentukan'
+            ? (tanggalSpesifik.trim() || undefined)
+            : undefined,
         penanggungjawab: {
           nama: pjNama.trim(),
           divisi: pjDivisi,
@@ -445,14 +469,14 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
             </div>
           </div>
 
-          {/* 6. JADWAL PELAKSANAAN (3 Pilihan: Sepanjang Tahun, Multi Bulan Terjadwal, Satu Kali Pelaksanaan) */}
+          {/* 6. JADWAL PELAKSANAAN (4 Pilihan: Sepanjang Tahun, Multi Bulan, Satu Kali, Akan Ditentukan Kemudian) */}
           <div className="pt-2 border-t border-slate-100">
             <label className="block text-xs font-bold text-slate-800 mb-2">
               Jadwal Pelaksanaan <span className="text-rose-500">*</span>
             </label>
 
             {/* Radio / Segment Options for Schedule Type */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
               {[
                 {
                   id: 'sepanjang_tahun',
@@ -468,6 +492,11 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
                   id: 'satu_kali',
                   title: 'Satu Kali Pelaksanaan',
                   desc: 'Acara / kegiatan tunggal di bulan tertentu',
+                },
+                {
+                  id: 'akan_ditentukan',
+                  title: 'Akan Ditentukan Kemudian',
+                  desc: 'Bulan pelaksanaan belum ditentukan sekarang',
                 },
               ].map((type) => {
                 const isSelected = tipeJadwal === type.id;
@@ -663,6 +692,31 @@ export const ProkerFormModal: React.FC<ProkerFormModalProps> = ({
                     onChange={(e) => setTanggalSpesifik(e.target.value)}
                     placeholder="Contoh: 17 Agustus 2025 / Pekan ke-2 / Akhir Bulan"
                     className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-slate-400"
+                  />
+                </div>
+              </div>
+            )}
+            {tipeJadwal === 'akan_ditentukan' && (
+              <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200 space-y-2.5">
+                <div className="flex items-start gap-2 text-xs text-amber-950">
+                  <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Bulan pelaksanaan belum ditentukan</p>
+                    <p className="text-[11px] text-amber-900/90 mt-0.5">
+                      Program ini akan disimpan tanpa bulan pelaksanaan tetap dan dapat diperbarui kapan saja setelah jadwal disepakati.
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-amber-950 mb-1">
+                    Catatan Perkiraan Jadwal (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={tanggalSpesifik}
+                    onChange={(e) => setTanggalSpesifik(e.target.value)}
+                    placeholder="Contoh: Jadwal akan ditentukan kemudian / Menunggu konfirmasi panitia"
+                    className="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500"
                   />
                 </div>
               </div>

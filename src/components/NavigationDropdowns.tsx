@@ -15,6 +15,9 @@ import {
   Users,
   Check,
   Heart,
+  Church,
+  ClipboardCheck,
+  Presentation,
 } from 'lucide-react';
 import { AuthSession } from '../types/auth';
 import { isDivisionMatch } from '../utils/formatters';
@@ -24,10 +27,14 @@ export type MainCategory = 'dashboard' | 'program' | 'keuangan' | 'pengurus';
 export type SubMenuKey =
   | 'dashboard_keseluruhan'
   | 'dashboard_keuangan'
+  | 'dashboard_presentasi'
   | 'komparasi'
   | 'input_program'
+  | 'evaluasi_program'
   | 'dual_planning'
   | 'perbandingan_program'
+  | 'review_pastor_2027'
+  | 'presentasi_2027'
   | 'keuangan_rencana_penerimaan'
   | 'keuangan_realisasi_penerimaan'
   | 'keuangan_penggunaan_dana'
@@ -76,19 +83,28 @@ export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
   const isPseUser =
     authSession?.unitNama === 'Seksi PSE' ||
     authSession?.unitId === 'div-pse' ||
-    (authSession?.unitNama ? isDivisionMatch(authSession.unitNama, 'Seksi PSE') : false);
+    (authSession?.unitNama
+      ? isDivisionMatch(authSession.unitNama, 'Seksi PSE') ||
+        authSession.unitNama.toLowerCase().includes('pse') ||
+        authSession.unitNama.toLowerCase().includes('sosial ekonomi')
+      : false);
 
   const canAccessKeuangan = isPastorOrAdmin || isBendahara || isPseUser;
 
   // Determine which parent category is currently active
   const isDashboardActive =
-    activeTab === 'dashboard_keseluruhan' || activeTab === 'dashboard_keuangan';
+    activeTab === 'dashboard_keseluruhan' ||
+    activeTab === 'dashboard_keuangan' ||
+    activeTab === 'dashboard_presentasi';
 
   const isProgramActive =
     activeTab === 'komparasi' ||
     activeTab === 'input_program' ||
+    activeTab === 'evaluasi_program' ||
     activeTab === 'dual_planning' ||
-    activeTab === 'perbandingan_program';
+    activeTab === 'perbandingan_program' ||
+    activeTab === 'review_pastor_2027' ||
+    activeTab === 'presentasi_2027';
 
   const isKeuanganActive =
     activeTab === 'keuangan_rencana_penerimaan' ||
@@ -125,7 +141,7 @@ export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
         </button>
 
         {openDropdown === 'dashboard' && (
-          <div className="absolute left-0 top-full mt-1.5 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+          <div className="absolute left-0 top-full mt-1.5 w-68 bg-white rounded-2xl shadow-xl border border-slate-200 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
             <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
               Pilihan Dashboard
             </div>
@@ -148,6 +164,50 @@ export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
                 </div>
               </div>
               {activeTab === 'dashboard_keseluruhan' && <Check className="w-4 h-4 text-emerald-600" />}
+            </button>
+
+            {/* Mode Presentasi Rapat */}
+            <button
+              type="button"
+              onClick={() => handleSelect('dashboard_presentasi')}
+              className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
+                activeTab === 'dashboard_presentasi'
+                  ? 'bg-indigo-50 text-indigo-950 font-black'
+                  : 'text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center">
+                  <BarChart3 className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="text-xs">📺 Mode Presentasi Rapat</div>
+                  <div className="text-[10px] text-slate-400 font-medium">Program bulanan &amp; hasil evaluasi</div>
+                </div>
+              </div>
+              {activeTab === 'dashboard_presentasi' && <Check className="w-4 h-4 text-indigo-600" />}
+            </button>
+
+            {/* Presentasi Program Kerja 2027 */}
+            <button
+              type="button"
+              onClick={() => handleSelect('presentasi_2027')}
+              className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
+                activeTab === 'presentasi_2027'
+                  ? 'bg-emerald-50 text-emerald-950 font-black'
+                  : 'text-slate-700 hover:bg-emerald-50/60'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                  <Presentation className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="text-xs">Presentasi Program Kerja 2027</div>
+                  <div className="text-[10px] text-slate-400 font-medium">Proker 2027, anggaran &amp; chart dana bulanan</div>
+                </div>
+              </div>
+              {activeTab === 'presentasi_2027' && <Check className="w-4 h-4 text-emerald-600" />}
             </button>
 
             {canAccessKeuangan && (
@@ -246,6 +306,33 @@ export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
               {activeTab === 'input_program' && <Check className="w-4 h-4 text-indigo-600" />}
             </button>
 
+            {/* Sub 3: Pengisian Evaluasi Program */}
+            <button
+              type="button"
+              onClick={() => handleSelect('evaluasi_program')}
+              className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-0.5 ${
+                activeTab === 'evaluasi_program'
+                  ? 'bg-emerald-50 text-emerald-950 font-black ring-1 ring-emerald-300'
+                  : 'text-slate-700 hover:bg-emerald-50/60'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                  <ClipboardCheck className="w-3.5 h-3.5 text-emerald-700" />
+                </div>
+                <div>
+                  <div className="text-xs font-black flex items-center gap-1.5">
+                    <span>Pengisian Evaluasi Program</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-emerald-200 text-emerald-950 text-[9px] font-black">
+                      Evaluasi
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium">Pengisian &amp; update evaluasi seluruh kegiatan</div>
+                </div>
+              </div>
+              {activeTab === 'evaluasi_program' && <Check className="w-4 h-4 text-emerald-600" />}
+            </button>
+
             {/* Sub 3: Perancangan Dua Sisi */}
             <button
               type="button"
@@ -288,6 +375,60 @@ export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
                 </div>
               </div>
               {activeTab === 'perbandingan_program' && <Check className="w-4 h-4 text-indigo-600" />}
+            </button>
+
+            {/* Sub 5: Review & Catatan Dewan Pastoral Paroki 2027 */}
+            <button
+              type="button"
+              onClick={() => handleSelect('review_pastor_2027')}
+              className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-1 border-t border-slate-100 ${
+                activeTab === 'review_pastor_2027'
+                  ? 'bg-amber-50 text-amber-950 font-black'
+                  : 'text-slate-800 hover:bg-amber-50/60'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center">
+                  <Church className="w-3.5 h-3.5 text-amber-700" />
+                </div>
+                <div>
+                  <div className="text-xs font-black flex items-center gap-1.5">
+                    <span>Catatan Dewan Pastoral Paroki 2027</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-amber-200 text-amber-950 text-[9px] font-black">
+                      Persetujuan DPP
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium">Arahan DPP &amp; persetujuan usulan program seksi</div>
+                </div>
+              </div>
+              {activeTab === 'review_pastor_2027' && <Check className="w-4 h-4 text-amber-700" />}
+            </button>
+
+            {/* Sub 6: Presentasi Program Kerja Tahun 2027 */}
+            <button
+              type="button"
+              onClick={() => handleSelect('presentasi_2027')}
+              className={`w-full p-2 rounded-xl text-left text-xs font-bold flex items-center justify-between transition-colors cursor-pointer mt-1 border-t border-slate-100 ${
+                activeTab === 'presentasi_2027'
+                  ? 'bg-emerald-50 text-emerald-950 font-black ring-1 ring-emerald-300'
+                  : 'text-slate-800 hover:bg-emerald-50/70'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                  <Presentation className="w-3.5 h-3.5 text-emerald-700" />
+                </div>
+                <div>
+                  <div className="text-xs font-black flex items-center gap-1.5">
+                    <span>Presentasi Program Kerja 2027</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-emerald-200 text-emerald-950 text-[9px] font-black">
+                      Chart 2027
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium">Rencana proker, anggaran &amp; grafik dana per bulan</div>
+                </div>
+              </div>
+              {activeTab === 'presentasi_2027' && <Check className="w-4 h-4 text-emerald-700" />}
             </button>
           </div>
         )}
@@ -564,6 +705,25 @@ export const NavigationDropdowns: React.FC<NavigationDropdownsProps> = ({
           </span>
         </button>
       )}
+
+      {/* 4b. TOMBOL CEPAT CATATAN DEWAN PASTORAL PAROKI 2027 */}
+      <button
+        type="button"
+        onClick={() => handleSelect('review_pastor_2027')}
+        className={`py-1.5 px-3 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+          activeTab === 'review_pastor_2027'
+            ? 'bg-amber-700 text-white shadow-xs ring-1 ring-amber-400'
+            : 'bg-white hover:bg-amber-50 text-slate-800 border border-slate-200/80 shadow-2xs'
+        }`}
+        title="Catatan, arahan, dan persetujuan Dewan Pastoral Paroki untuk usulan program kerja tahun 2027"
+      >
+        <Church
+          className={`w-3.5 h-3.5 ${
+            activeTab === 'review_pastor_2027' ? 'text-amber-200' : 'text-amber-700'
+          }`}
+        />
+        <span>Catatan DPP 2027</span>
+      </button>
 
       {/* 5. TOMBOL PENGURUS PAROKI */}
       <button

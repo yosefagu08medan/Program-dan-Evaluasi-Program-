@@ -1,4 +1,4 @@
-export type ScheduleType = 'sepanjang_tahun' | 'multi_bulan' | 'satu_kali';
+export type ScheduleType = 'sepanjang_tahun' | 'multi_bulan' | 'satu_kali' | 'akan_ditentukan';
 
 export type ProgramStatus = 'direncanakan' | 'berjalan' | 'selesai' | 'ditunda';
 
@@ -18,7 +18,12 @@ export interface DokumenLampiran {
   ukuran?: string; // e.g. '2.4 MB'
 }
 
-export type StatusKeterlaksanaan = 'terlaksana' | 'tidak_terlaksana' | 'perubahan_waktu';
+export type StatusKeterlaksanaan =
+  | 'terlaksana'
+  | 'tidak_terlaksana'
+  | 'perubahan_waktu'
+  | 'belum_terlaksana'
+  | 'terlaksana_sebagian';
 
 export interface EvaluasiProgram {
   statusKeterlaksanaan?: StatusKeterlaksanaan;
@@ -31,6 +36,9 @@ export interface EvaluasiProgram {
   dokumentasi?: DokumenLampiran[];
   // Jika tidak terlaksana:
   alasanTidakTerlaksana?: string;
+  // Rincian untuk program multi-bulan yang terlaksana sebagian:
+  bulanTidakTerlaksanaList?: number[];
+  rincianTidakTerlaksana?: Array<{ bulan: number; namaBulan: string; alasan: string }>;
   // Jika perubahan waktu pelaksanaan:
   jadwalBaru?: string; // e.g. Rencana tanggal atau bulan baru
   alasanPerubahanWaktu?: string; // Alasan pergantian waktu
@@ -80,8 +88,39 @@ export interface ProgramKerja {
   diubahOleh?: string; // Aktor yang melakukan perubahan terakhir (Pastor Paroki / Admin / Seksi)
   tanggalPerubahan?: string; // Waktu perubahan terakhir disimpan
   catatan?: string;
+  nomorUrut?: number; // Nomor urut teratur program
+  // Review & Catatan Persetujuan Pastor Paroki untuk Program Tahun 2027:
+  catatanPastorParoki?: CatatanPastorParoki;
+  // Catatan Revisi Anggaran / Penjadwalan dari Dashboard Penggunaan Dana & Penerimaan:
+  catatanRevisiAnggaran?: CatatanRevisiAnggaran;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CatatanRevisiAnggaran {
+  perluRevisi: boolean;
+  catatan: string;
+  targetBulan?: number;
+  rekomendasiAnggaran?: number;
+  ditujukanKepada?: string;
+  dibuatOleh?: string;
+  tanggalCatatan?: string;
+  statusTindakLanjut?: 'menunggu_revisi' | 'sudah_direvisi';
+}
+
+export type StatusPersetujuanPastor =
+  | 'menunggu_review'
+  | 'disetujui'
+  | 'disetujui_dengan_catatan'
+  | 'perlu_revisi'
+  | 'ditolak';
+
+export interface CatatanPastorParoki {
+  statusPersetujuan: StatusPersetujuanPastor;
+  catatan?: string; // Catatan arahan pastoral / evaluasi dari Romo
+  rekomendasiAnggaran?: number; // Catatan penyesuaian anggaran jika ada
+  tanggalReview?: string; // Tanggal review dilakukan
+  namaPastor?: string; // Nama Pastor Paroki / Romo peninjau
 }
 
 export interface FilterOptions {

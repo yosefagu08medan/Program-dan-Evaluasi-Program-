@@ -20,6 +20,8 @@ import {
   getTipeJadwalLabel,
   BULAN_LIST,
   getTotalAnggaranTerpakai,
+  getProgramExecutionSummary,
+  getLatestEvaluasi,
 } from '../utils/formatters';
 
 interface ProgramCardProps {
@@ -63,12 +65,49 @@ export const ProgramCard: React.FC<ProgramCardProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 flex-wrap">
-          {program.evaluasi?.statusKeterlaksanaan === 'terlaksana' && (
-            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 shadow-2xs">
-              <CheckCircle2 className="w-3 h-3 text-emerald-700" />
-              <span>Terlaksana dan Sudah Dievaluasi</span>
-            </span>
-          )}
+          {(() => {
+            const summary = getProgramExecutionSummary(program);
+            const ev = getLatestEvaluasi(program);
+            if (summary.overallStatus === 'terlaksana_sebagian') {
+              return (
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-teal-100 text-teal-950 border border-teal-300 flex items-center gap-1 shadow-2xs">
+                  <CheckCircle2 className="w-3 h-3 text-teal-700" />
+                  <span>Terlaksana Sebagian ({summary.terlaksanaMonths.length}/{summary.scheduledMonths.length} Bln)</span>
+                </span>
+              );
+            }
+            if (summary.overallStatus === 'terlaksana_penuh' || ev?.statusKeterlaksanaan === 'terlaksana') {
+              return (
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1 shadow-2xs">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                  <span>Terlaksana dan Sudah Dievaluasi</span>
+                </span>
+              );
+            }
+            if (summary.overallStatus === 'perubahan_waktu' || ev?.statusKeterlaksanaan === 'perubahan_waktu') {
+              return (
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 border border-blue-300 flex items-center gap-1 shadow-2xs">
+                  <Clock className="w-3 h-3 text-blue-700" />
+                  <span>Geser Waktu (Sudah Dievaluasi)</span>
+                </span>
+              );
+            }
+            if (summary.overallStatus === 'tidak_terlaksana' || ev?.statusKeterlaksanaan === 'tidak_terlaksana') {
+              return (
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-100 text-rose-900 border border-rose-300 flex items-center gap-1 shadow-2xs">
+                  <span>✕ Tidak Terlaksana (Sudah Dievaluasi)</span>
+                </span>
+              );
+            }
+            if (summary.rincianTidakTerlaksana.length > 0) {
+              return (
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-300 flex items-center gap-1 shadow-2xs">
+                  <span>⚠️ Sudah Dievaluasi ({summary.rincianTidakTerlaksana.length} Bln Batal)</span>
+                </span>
+              );
+            }
+            return null;
+          })()}
           {/* Status Dropdown/Selector */}
           <div className="relative">
             <select
@@ -168,6 +207,15 @@ export const ProgramCard: React.FC<ProgramCardProps> = ({
             <p className="text-xs font-semibold text-slate-800">
               Sepanjang Tahun (Jan – Des)
             </p>
+          ) : program.tipeJadwal === 'akan_ditentukan' || !program.bulanPelaksanaan || program.bulanPelaksanaan.length === 0 ? (
+            <div className="text-xs font-semibold text-amber-800">
+              <span>Akan Ditentukan Kemudian</span>
+              {program.tanggalSpesifik && (
+                <span className="text-slate-500 font-normal block text-[11px] truncate">
+                  ({program.tanggalSpesifik})
+                </span>
+              )}
+            </div>
           ) : program.tipeJadwal === 'satu_kali' ? (
             <div className="text-xs font-semibold text-slate-800">
               <span>Bulan {BULAN_LIST[(program.bulanPelaksanaan[0] || 1) - 1]?.nama}</span>
@@ -190,7 +238,9 @@ export const ProgramCard: React.FC<ProgramCardProps> = ({
         <div className="flex items-center justify-between text-[9px] font-bold text-slate-400 mb-1 px-0.5">
           <span>Timeline Bulan:</span>
           <span>
-            {program.bulanPelaksanaan?.length || 0} dari 12 bulan aktif
+            {program.tipeJadwal === 'akan_ditentukan' && (!program.bulanPelaksanaan || program.bulanPelaksanaan.length === 0)
+              ? 'Jadwal akan ditentukan kemudian'
+              : `${program.bulanPelaksanaan?.length || 0} dari 12 bulan aktif`}
           </span>
         </div>
         <div className="grid grid-cols-12 gap-1">

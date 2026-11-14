@@ -41,6 +41,9 @@ import {
   isSeksiTetap,
   isDpphOrAdmin,
   calculateKolekte1Split,
+  calculatePseAnnualTargetSummary,
+  isPseTargetTahunan,
+  PseAnnualTargetSummary,
 } from '../types/penerimaan';
 import { ProgramKerja } from '../types/proker';
 import { AuthSession } from '../types/auth';
@@ -87,7 +90,14 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
   const isSemuaSeksi = authSession?.role === 'semua_seksi';
   const isDpph = isPastorParoki || isSemuaSeksi || authSession?.unitId === 'div-dpph';
   const isAuthorizedGlobal = isDpph || isBendahara;
-  const isSeksiPSE = authSession?.unitNama === 'Seksi PSE' || authSession?.unitId === 'div-pse';
+  const isSeksiPSE = Boolean(
+    authSession?.unitNama === 'Seksi PSE' ||
+    authSession?.unitId === 'div-pse' ||
+    (authSession?.unitNama && (
+      authSession.unitNama.toLowerCase().includes('pse') ||
+      authSession.unitNama.toLowerCase().includes('sosial ekonomi')
+    ))
+  );
   const isOtherSeksi = authSession?.role === 'seksi' && !isSeksiPSE && !isDpph;
   const isSeksiUser = authSession?.role === 'seksi' && !isDpph;
 
@@ -365,6 +375,80 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
       };
     });
   }, [filteredList, selectedTahun, selectedBulan]);
+
+  // Perhitungan Ringkasan Target Tahunan PSE (Dana Solidaritas Umat sepanjang tahun tentatif)
+  const pseAnnualSummary = useMemo(() => {
+    const thn = selectedTahun !== 'all' ? selectedTahun : 2026;
+    return calculatePseAnnualTargetSummary(penerimaanList, thn, 'Dana Solidaritas Umat');
+  }, [penerimaanList, selectedTahun]);
+
+  // Kelompokkan data penerimaan per Bulan (1-12) khusus untuk Seksi PSE (karena tidak mingguan, tapi per bulan)
+  const pseMonthlyGroups = useMemo(() => {
+    const months = Array.from({ length: 12 }, (_, i) => {
+      const monthNum = i + 1;
+      const items = filteredList.filter((item) => item.bulan === monthNum);
+      // Untuk pos target tahunan (Dana Solidaritas Umat), jangan tambahkan ke rancangan bulanan agar tidak melipatgandakan target 12 kali
+      const totalRancangan = items.reduce((sum, item) => {
+        if (isPseTargetTahunan(item) || item.isTargetTahunan) {
+          return sum;
+        }
+        return sum + (item.rancangan || 0);
+      }, 0);
+      const totalRealisasi = items.reduce((sum, item) => sum + (item.realisasi || 0), 0);
+      const selisih = totalRealisasi - totalRancangan;
+      const persentase = totalRancangan > 0 ? Math.round((totalRealisasi / totalRancangan) * 100) : 0;
+      return {
+        monthNum,
+        monthName: BULAN_LIST[i]?.nama || `Bulan ${i + 1}`,
+        items,
+        totalRancangan,
+        totalRealisasi,
+        selisih,
+        persentase,
+      };
+    });
+
+    if (selectedBulan !== 'all') {
+      return months.filter((m) => m.monthNum === selectedBulan);
+    }
+    return months;
+  }, [filteredList, selectedBulan]);
+
+  const handleOpenAddPSEForMonth = (monthNum: number, presetNama?: string) => {
+    setEditingItem(null);
+    setDefaultKategoriForModal('persembahan_umat');
+    setDefaultNamaForModal(presetNama || 'Dana Solidaritas Umat');
+    setDefaultRancanganForModal(0);
+    setDefaultRealisasiForModal(0);
+    setIsTentatifModalMode(false);
+    setTargetSeksiForModal('Seksi PSE');
+    setDefaultMingguForAdd(1);
+    setSelectedBulan(monthNum);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditAnnualTarget = () => {
+    const thn = selectedTahun !== 'all' ? selectedTahun : 2026;
+    const existing = penerimaanList.find(
+      (p) =>
+        p.tahun === thn &&
+        (isPseTargetTahunan(p) || (p.namaPenerimaan && p.namaPenerimaan.toLowerCase().includes('solidaritas')))
+    );
+    if (existing) {
+      setEditingItem(existing);
+      setSelectedBulan(existing.bulan);
+    } else {
+      setEditingItem(null);
+      setDefaultNamaForModal('Dana Solidaritas Umat');
+      setDefaultKategoriForModal('persembahan_umat');
+      setDefaultRancanganForModal(0);
+      setDefaultRealisasiForModal(0);
+      setSelectedBulan(1);
+    }
+    setDefaultMingguForAdd(1);
+    setTargetSeksiForModal('Seksi PSE');
+    setIsModalOpen(true);
+  };
 
   // Handle open add modal (Paroki / Bendahara)
   const handleOpenAddParoki = (mingguKe?: 1 | 2 | 3 | 4 | 5) => {
@@ -687,18 +771,6 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
               </>
             )}
 
-            {/* Tombol Seksi PSE */}
-            {!isBendahara && isSeksiPSE && (
-              <button
-                type="button"
-                onClick={() => handleOpenAddPSE()}
-                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-xs flex items-center gap-1 transition-all cursor-pointer"
-                title="Input Rencana & Realisasi Seksi PSE"
-              >
-                <Heart className="w-3 h-3 text-amber-950" />
-                <span>+ Input PSE (APP/Natal/Derma)</span>
-              </button>
-            )}
 
             {/* Tombol Seksi Lainnya */}
             {!isBendahara && isOtherSeksi && (
@@ -812,48 +884,55 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
             </div>
           </div>
 
-          {/* Filter Minggu */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-700">Filter Minggu:</span>
-            <div className="inline-flex bg-slate-100 p-1 rounded-xl">
-              <button
-                type="button"
-                onClick={() => setSelectedMinggu('all')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  selectedMinggu === 'all'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Semua
-              </button>
-              {(selectedBulan === 'all'
-                ? [1, 2, 3, 4, 5]
-                : Array.from(
-                    {
-                      length: getSundaysInMonth(
-                        selectedTahun !== 'all' ? selectedTahun : 2026,
-                        selectedBulan as number
-                      ).length,
-                    },
-                    (_, i) => (i + 1) as 1 | 2 | 3 | 4 | 5
-                  )
-              ).map((w) => (
+          {/* Filter Minggu: Ditampilkan hanya untuk Kolekte/Non-PSE karena PSE berbasis Bulan */}
+          {!isSeksiPSE && selectedSeksi !== 'Seksi PSE' ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-700">Filter Minggu:</span>
+              <div className="inline-flex bg-slate-100 p-1 rounded-xl">
                 <button
-                  key={w}
                   type="button"
-                  onClick={() => setSelectedMinggu(w)}
+                  onClick={() => setSelectedMinggu('all')}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    selectedMinggu === w
+                    selectedMinggu === 'all'
                       ? 'bg-emerald-600 text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  M-{w}
+                  Semua
                 </button>
-              ))}
+                {(selectedBulan === 'all'
+                  ? [1, 2, 3, 4, 5]
+                  : Array.from(
+                      {
+                        length: getSundaysInMonth(
+                          selectedTahun !== 'all' ? selectedTahun : 2026,
+                          selectedBulan as number
+                        ).length,
+                      },
+                      (_, i) => (i + 1) as 1 | 2 | 3 | 4 | 5
+                    )
+                ).map((w) => (
+                  <button
+                    key={w}
+                    type="button"
+                    onClick={() => setSelectedMinggu(w)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      selectedMinggu === w
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    M-{w}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-xl text-xs font-black text-amber-950 shadow-2xs">
+              <Heart className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
+              <span>Seksi PSE: Format Penerimaan Bulanan (Total Kasih)</span>
+            </div>
+          )}
 
           {/* Pencarian */}
           <div className="relative grow sm:grow-0 sm:w-64">
@@ -1504,6 +1583,408 @@ export const PenerimaanMingguanView: React.FC<PenerimaanMingguanViewProps> = ({
           isDpph={isDpph}
           modeFocus={initialModeFocus}
         />
+      ) : isSeksiPSE || selectedSeksi === 'Seksi PSE' ? (
+        /* ======================================================== */
+        /* TAMPILAN BULANAN KHUSUS SEKSI PSE (TOTAL PENERIMAAN PER BULAN) */
+        /* ======================================================== */
+        <div className="space-y-4">
+          {/* TRACKER TARGET TAHUNAN: DANA SOLIDARITAS UMAT PSE (SEPANJANG TAHUN TENTATIF) */}
+          <div className="bg-gradient-to-br from-amber-950 via-slate-900 to-stone-900 text-white rounded-3xl p-5 sm:p-6 shadow-xl border-2 border-amber-500/40 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-amber-500/20">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-400/40 flex items-center justify-center font-black shadow-inner shrink-0">
+                  <Target className="w-6 h-6 text-amber-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base sm:text-lg font-black tracking-tight text-white">
+                      Dana Solidaritas Umat PSE {selectedTahun !== 'all' ? selectedTahun : 2026}
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-400 text-amber-950">
+                      🗓️ Target Pertahun (Bukan Perbulan)
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-amber-200 border border-amber-300/30">
+                      Tentatif Sepanjang Tahun
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-200/80 font-medium mt-0.5 leading-relaxed">
+                    Pelaksanaan dihimpun tentatif sepanjang tahun. Setiap ada realisasi dana masuk di bulan apa saja (Jan - Des), sistem otomatis <strong>mengurangi sisa target secara tahunan</strong>.
+                  </p>
+                </div>
+              </div>
+
+              {/* Quick Actions Target Tahunan */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleOpenEditAnnualTarget}
+                  className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-amber-200 border border-amber-400/40 text-xs font-black transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Edit className="w-3.5 h-3.5" />
+                  <span>Ubah Target Pertahun</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddPSEForMonth(selectedBulan !== 'all' ? (selectedBulan as number) : 1, 'Dana Solidaritas Umat')}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-amber-950 font-black text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-amber-500/20"
+                >
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
+                  <span>+ Catat Realisasi Masuk</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 4 Stat Cards Target Tahunan */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* Target Rencana Pertahun */}
+              <div className="bg-white/10 rounded-2xl p-3.5 border border-white/10 backdrop-blur-xs space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-200/90 block">
+                  Target Rencana Pertahun
+                </span>
+                <div className="text-lg sm:text-xl font-black text-white">
+                  {formatRupiah(pseAnnualSummary.targetTahunan)}
+                </div>
+                <span className="text-[10px] text-slate-300 block">
+                  Pagu 1 Tahun Penuh
+                </span>
+              </div>
+
+              {/* Total Realisasi Masuk */}
+              <div className="bg-white/10 rounded-2xl p-3.5 border border-white/10 backdrop-blur-xs space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 block">
+                  Total Realisasi Masuk
+                </span>
+                <div className="text-lg sm:text-xl font-black text-emerald-300">
+                  {formatRupiah(pseAnnualSummary.totalRealisasiTahunan)}
+                </div>
+                <span className="text-[10px] text-slate-300 block">
+                  Kumulatif Januari - Desember
+                </span>
+              </div>
+
+              {/* Sisa Target Tahunan (Otomatis Berkurang) */}
+              <div className={`rounded-2xl p-3.5 border space-y-1 ${
+                pseAnnualSummary.isSurplus
+                  ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200'
+                  : 'bg-amber-500/20 border-amber-400/40 text-amber-200'
+              }`}>
+                <span className="text-[10px] font-black uppercase tracking-wider block">
+                  {pseAnnualSummary.isSurplus ? '✓ Surplus Target Tahunan' : '⚡ Sisa Target Tahunan'}
+                </span>
+                <div className="text-lg sm:text-xl font-black text-white">
+                  {pseAnnualSummary.isSurplus
+                    ? `+${formatRupiah(pseAnnualSummary.selisihSurplus)}`
+                    : formatRupiah(pseAnnualSummary.sisaTargetTahunan)}
+                </div>
+                <span className="text-[10px] font-bold block">
+                  {pseAnnualSummary.isSurplus ? 'Target 100% Tercapai & Melebihi' : 'Berkurang setiap ada kas masuk'}
+                </span>
+              </div>
+
+              {/* Persentase Capaian */}
+              <div className="bg-white/10 rounded-2xl p-3.5 border border-white/10 backdrop-blur-xs space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-200/90 block">
+                  Persentase Capaian
+                </span>
+                <div className="text-lg sm:text-xl font-black text-amber-300">
+                  {pseAnnualSummary.persentaseTahunan}%
+                </div>
+                <span className="text-[10px] text-slate-300 block">
+                  {pseAnnualSummary.isSurplus ? 'Target Tuntas' : `${100 - pseAnnualSummary.persentaseTahunan}% sisa target`}
+                </span>
+              </div>
+            </div>
+
+            {/* Visual Progress Bar */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between text-xs font-bold text-amber-200/90">
+                <span>Progress Pencapaian Target Tahunan:</span>
+                <span className="font-black text-white">{pseAnnualSummary.persentaseTahunan}% / 100%</span>
+              </div>
+              <div className="w-full h-3 rounded-full bg-black/40 overflow-hidden border border-white/10 p-0.5">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    pseAnnualSummary.isSurplus
+                      ? 'bg-emerald-500'
+                      : 'bg-gradient-to-r from-amber-500 via-orange-400 to-amber-300'
+                  }`}
+                  style={{ width: `${Math.min(100, Math.max(0, pseAnnualSummary.persentaseTahunan))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* 12-Month Realization Breakdown Chips */}
+            <div className="pt-2 border-t border-amber-500/20 space-y-2">
+              <div className="flex items-center justify-between text-xs text-amber-200/80 font-bold">
+                <span>Sebaran Realisasi Sepanjang Tahun (12 Bulan):</span>
+                <span className="text-[10px] text-slate-400">Klik bulan untuk mencatat transaksi masuk</span>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-6 md:grid-cols-12 gap-1.5">
+                {pseAnnualSummary.bulananRealisasi.map((bm) => {
+                  const hasReal = bm.realisasi > 0;
+                  return (
+                    <button
+                      key={bm.bulan}
+                      type="button"
+                      onClick={() => handleOpenAddPSEForMonth(bm.bulan, 'Dana Solidaritas Umat')}
+                      className={`p-2 rounded-xl text-center transition-all cursor-pointer border ${
+                        hasReal
+                          ? 'bg-emerald-500/25 border-emerald-400/60 hover:bg-emerald-500/35 text-white'
+                          : 'bg-white/5 border-white/10 hover:bg-white/10 text-slate-400'
+                      }`}
+                      title={`Bulan ${bm.namaBulan}: ${formatRupiah(bm.realisasi)} (Klik untuk input)`}
+                    >
+                      <div className="text-[9.5px] font-black uppercase text-amber-200/90">{bm.namaBulan.substring(0, 3)}</div>
+                      <div className={`text-[10px] font-black mt-0.5 truncate ${hasReal ? 'text-emerald-300' : 'text-slate-500'}`}>
+                        {hasReal ? formatCompactRupiah(bm.realisasi) : '-'}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3 bg-amber-50/80 rounded-2xl border border-amber-300 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+            <div className="flex items-center gap-2">
+              <Heart className="w-4 h-4 text-amber-600 fill-amber-500" />
+              <span className="text-xs font-black">
+                Format Khusus Seksi PSE: Rekapitulasi Penerimaan per Bulan
+              </span>
+            </div>
+            <span className="text-[11px] text-amber-800 font-semibold">
+              Dana Aksi Puasa Pembangunan (APP) · Amplop Natal · Dana Solidaritas Umat (Target Tahunan)
+            </span>
+          </div>
+
+          {pseMonthlyGroups.map((mg) => {
+            const hasItems = mg.items.length > 0;
+
+            return (
+              <div
+                key={mg.monthNum}
+                className="bg-white rounded-2xl border border-amber-200 shadow-2xs overflow-hidden transition-all hover:border-amber-300"
+              >
+                {/* Header Bulan PSE (Menampilkan Total Penerimaan Bulan Ini) */}
+                <div className="px-4 py-3 bg-gradient-to-r from-amber-50/90 via-orange-50/50 to-white border-b border-amber-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-amber-600 text-white font-black text-xs flex items-center justify-center shadow-2xs shrink-0">
+                      B{mg.monthNum}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-black text-slate-900">
+                          Bulan {mg.monthName} {selectedTahun !== 'all' ? selectedTahun : 2026}
+                        </h3>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                          {mg.items.length} Pos Penerimaan
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-medium">
+                        Total penerimaan kasih &amp; derma umat Seksi PSE bulan {mg.monthName}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Subtotal Total Penerimaan Per Bulan */}
+                  <div className="flex items-center gap-4 shrink-0">
+                    <div className="text-right">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Total Rencana:
+                      </div>
+                      <div className="text-xs font-black text-slate-700">
+                        {formatRupiah(mg.totalRancangan)}
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">
+                        Total Realisasi Riil:
+                      </div>
+                      <div className="text-xs sm:text-sm font-black text-emerald-700">
+                        {formatRupiah(mg.totalRealisasi)}
+                      </div>
+                    </div>
+
+                    {/* Tombol Input Pos Penerimaan Bulan Ini */}
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAddPSEForMonth(mg.monthNum)}
+                      className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                      title={`Tambah pos penerimaan baru untuk bulan ${mg.monthName}`}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Input Pos PSE</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Progress Bar Ketercapaian Bulan Ini */}
+                <div className="px-4 pt-2.5 pb-1">
+                  <div className="flex items-center justify-between text-[10.5px] font-bold text-slate-600 mb-0.5">
+                    <span>Capaian Penerimaan Bulan {mg.monthName}:</span>
+                    <span className={mg.selisih >= 0 ? 'text-emerald-700 font-black' : 'text-amber-700 font-black'}>
+                      {mg.persentase}% ({mg.selisih >= 0 ? '+' : ''}{formatRupiah(mg.selisih)})
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-300 rounded-full ${
+                        mg.selisih >= 0 ? 'bg-emerald-500' : 'bg-amber-500'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(0, mg.persentase))}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Rincian Pos Penerimaan PSE Bulan Ini */}
+                {!hasItems ? (
+                  <div className="px-4 py-5 text-center text-slate-400 space-y-2">
+                    <p className="text-xs font-bold text-slate-600">
+                      Belum ada pos penerimaan PSE yang tercatat di bulan {mg.monthName}
+                    </p>
+                    <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                      Klik tombol di atas atau di bawah untuk menambahkan pos penerimaan seperti APP, Amplop Natal, atau Dana Solidaritas Umat.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAddPSEForMonth(mg.monthNum)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-all cursor-pointer shadow-2xs"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Tambah Pos Penerimaan Bulan {mg.monthName}</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-3 sm:p-3.5">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-amber-200 text-[10.5px] font-black uppercase tracking-wider text-slate-400">
+                            <th className="pb-2.5 pl-2 font-black">Tanggal &amp; Kategori</th>
+                            <th className="pb-2.5 font-black">Nama Pos Penerimaan PSE</th>
+                            <th className="pb-2.5 text-right font-black">Rencana (Target)</th>
+                            <th className="pb-2.5 text-right font-black">Realisasi (Kas Masuk)</th>
+                            <th className="pb-2.5 text-right font-black">Selisih &amp; Deduksi</th>
+                            <th className="pb-2.5 pr-2 text-center font-black">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-xs">
+                          {mg.items.map((item) => {
+                            const meta = getKategoriMeta(item.kategori);
+                            const isTargetTahunanItem = isPseTargetTahunan(item) || item.isTargetTahunan;
+                            const selisihItem = (item.realisasi || 0) - (item.rancangan || 0);
+                            const isSurplus = selisihItem >= 0;
+
+                            return (
+                              <tr key={item.id} className="hover:bg-amber-50/30 transition-colors">
+                                <td className="py-2.5 pl-2 pr-2.5 align-top whitespace-nowrap">
+                                  <div className="font-extrabold text-slate-900 text-xs">
+                                    {formatIndonesianDate(item.tanggal, true)}
+                                  </div>
+                                  <span className={`inline-block px-2 py-0.2 rounded-full text-[9px] font-black border mt-0.5 ${meta.badgeColor}`}>
+                                    {meta.label}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 pr-2.5 align-top max-w-xs sm:max-w-md">
+                                  <div className="font-extrabold text-slate-900 leading-snug text-xs flex items-center gap-1.5 flex-wrap">
+                                    <span>{item.namaPenerimaan}</span>
+                                    {isTargetTahunanItem && (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-100 text-amber-900 border border-amber-300">
+                                        🗓️ Target Tahunan (Tentatif)
+                                      </span>
+                                    )}
+                                  </div>
+                                  {item.keterangan && (
+                                    <p className="text-[10.5px] text-slate-500 mt-0.5 italic leading-tight">
+                                      {item.keterangan}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="py-2.5 pr-2.5 text-right align-top whitespace-nowrap font-bold text-slate-800">
+                                  {isTargetTahunanItem ? (
+                                    <div>
+                                      <div className="font-extrabold text-amber-950 text-xs">
+                                        {formatRupiah(item.targetTahunan || pseAnnualSummary.targetTahunan)}
+                                      </div>
+                                      <span className="text-[9px] text-amber-800 font-bold block">
+                                        Pagu 1 Tahun
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    formatRupiah(item.rancangan)
+                                  )}
+                                </td>
+                                <td className="py-2.5 pr-2.5 text-right align-top whitespace-nowrap font-black text-emerald-700">
+                                  <div>
+                                    <div className="text-xs sm:text-sm font-black">
+                                      {formatRupiah(item.realisasi)}
+                                    </div>
+                                    <span className="text-[9px] text-slate-400 font-medium block">
+                                      Masuk Bln {mg.monthName}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="py-2.5 pr-2.5 text-right align-top whitespace-nowrap font-black">
+                                  {isTargetTahunanItem ? (
+                                    <div>
+                                      <span className="text-[9.5px] font-black text-amber-900 block uppercase">
+                                        Mengurangi Target:
+                                      </span>
+                                      <div className="text-xs">
+                                        {pseAnnualSummary.isSurplus ? (
+                                          <span className="text-emerald-700 font-black">
+                                            Surplus +{formatRupiah(pseAnnualSummary.selisihSurplus)}
+                                          </span>
+                                        ) : (
+                                          <span className="text-amber-900 font-black">
+                                            Sisa: {formatRupiah(pseAnnualSummary.sisaTargetTahunan)}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span className="text-[9px] text-slate-500 font-bold block">
+                                        Kumulatif: {formatRupiah(pseAnnualSummary.totalRealisasiTahunan)} ({pseAnnualSummary.persentaseTahunan}%)
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className={isSurplus ? 'text-emerald-700' : 'text-amber-700'}>
+                                      {isSurplus ? '+' : ''}
+                                      {formatRupiah(selisihItem)}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 pr-2 text-center align-top whitespace-nowrap">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEdit(item)}
+                                      className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 transition-colors cursor-pointer"
+                                      title="Edit target rencana atau realisasi ini"
+                                    >
+                                      <Edit className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeletingId(item.id)}
+                                      className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors cursor-pointer"
+                                      title="Hapus pos penerimaan ini"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : (
         /* TAMPILAN MINGGUAN TERSTRUKTUR (MINGGU 1 - 5) */
         <div className="space-y-3">

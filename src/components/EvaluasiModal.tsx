@@ -25,6 +25,7 @@ import {
   getEvaluasiForMonth,
   getAnggaranTerpakaiSebelumBulan,
   getSisaBudgetUntukBulan,
+  getProgramExecutionSummary,
 } from '../utils/formatters';
 
 interface EvaluasiModalProps {
@@ -60,10 +61,60 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
   const [alasanPerubahanWaktu, setAlasanPerubahanWaktu] = useState<string>('');
   const [penjelasanPerubahan, setPenjelasanPerubahan] = useState<string>('');
   const [evaluator, setEvaluator] = useState<string>('');
+  const [uploadWarning, setUploadWarning] = useState<string | null>(null);
 
   const isBerulang = useMemo(() => {
-    return program ? isProgramBerulang(program) : false;
+    return program ? (isProgramBerulang(program) || program.tipeJadwal === 'multi_bulan') : false;
   }, [program]);
+
+  const liveSummary = useMemo(() => {
+    if (!program) return null;
+    const draftEvaluasi: EvaluasiProgram = {
+      statusKeterlaksanaan,
+      tanggalPelaksanaan,
+      tempatPelaksanaan,
+      jumlahPeserta,
+      penjelasanKegiatan,
+      anggaranTerpakai,
+      dokumentasi,
+      alasanTidakTerlaksana: alasanTidakTerlaksana.trim() || undefined,
+      jadwalBaru,
+      alasanPerubahanWaktu,
+      penjelasanPerubahan,
+      evaluator,
+    };
+
+    const simulatedProgram: ProgramKerja = isBerulang
+      ? {
+          ...program,
+          evaluasiBulanan: {
+            ...(program.evaluasiBulanan || {}),
+            [activeBulan]: draftEvaluasi,
+          },
+        }
+      : {
+          ...program,
+          evaluasi: draftEvaluasi,
+        };
+
+    return getProgramExecutionSummary(simulatedProgram);
+  }, [
+    program,
+    isBerulang,
+    activeBulan,
+    statusKeterlaksanaan,
+    tanggalPelaksanaan,
+    tempatPelaksanaan,
+    jumlahPeserta,
+    penjelasanKegiatan,
+    anggaranTerpakai,
+    dokumentasi,
+    alasanTidakTerlaksana,
+    jadwalBaru,
+    alasanPerubahanWaktu,
+    penjelasanPerubahan,
+    evaluator,
+  ]);
 
   // Daftar bulan yang berlaku untuk program ini
   const availableMonths = useMemo(() => {
@@ -101,10 +152,11 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
 
   // Muat data evaluasi untuk bulan aktif
   useEffect(() => {
+    setUploadWarning(null);
     if (program) {
       const prev = isBerulang ? getEvaluasiForMonth(program, activeBulan) : program.evaluasi;
-      if (prev) {
-        setStatusKeterlaksanaan(prev.statusKeterlaksanaan || 'terlaksana');
+      if (prev && prev.statusKeterlaksanaan) {
+        setStatusKeterlaksanaan(prev.statusKeterlaksanaan);
         setTanggalPelaksanaan(prev.tanggalPelaksanaan || '');
         setTempatPelaksanaan(prev.tempatPelaksanaan || '');
         setJumlahPeserta(prev.jumlahPeserta || '');
@@ -118,8 +170,8 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
         setPenjelasanPerubahan(prev.penjelasanPerubahan || '');
         setEvaluator(prev.evaluator || program.penanggungjawab?.nama || '');
       } else {
-        // Default kosong untuk bulan ini
-        setStatusKeterlaksanaan('terlaksana');
+        // Default belum terlaksana jika belum ada data evaluasi
+        setStatusKeterlaksanaan('belum_terlaksana');
         const defaultDate =
           program.jadwalBulanan?.[activeBulan] ||
           (program.tanggalSpesifik?.match(/\d{4}-\d{2}-\d{2}/)?.[0]) ||
@@ -148,12 +200,17 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
     setRawAnggaran(num ? num.toLocaleString('id-ID') : '');
   };
 
-  // Upload file dokumentasi
+  // Upload file dokumentasi (batasi ukuran agar sesuai limit 1MB dokumen Firestore)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    setUploadWarning(null);
 
     Array.from(files).forEach((file) => {
+      if (file.size > 700 * 1024) {
+        setUploadWarning(`File "${file.name}" terlalu besar (${Math.round(file.size / 1024)} KB). Maksimal 700 KB per file agar penyimpanan Cloud berhasil.`);
+        return;
+      }
       const reader = new FileReader();
       const sizeStr = file.size > 1024 * 1024
         ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
@@ -248,6 +305,98 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
 
         {/* Form Body Scrollable */}
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+          {/* BANNER STATUS KESELURUHAN MULTI-BULAN JIKA TERLAKSANA SEBAGIAN ATAU ADA BULAN TIDAK TERLAKSANA */}
+          {isBerulang && liveSummary && (liveSummary.overallStatus === 'terlaksana_sebagian' || liveSummary.rincianTidakTerlaksana.length > 0) && (
+            <div
+              className={`p-3 rounded-2xl border-2 space-y-2 text-xs animate-in fade-in ${
+                liveSummary.overallStatus === 'terlaksana_sebagian'
+                  ? 'bg-teal-50/90 border-teal-300'
+                  : liveSummary.overallStatus === 'tidak_terlaksana'
+                  ? 'bg-rose-50/90 border-rose-300'
+                  : 'bg-amber-50/90 border-amber-300'
+              }`}
+            >
+              <div
+                className={`flex items-center justify-between border-b pb-1.5 flex-wrap gap-1 ${
+                  liveSummary.overallStatus === 'terlaksana_sebagian'
+                    ? 'border-teal-200'
+                    : liveSummary.overallStatus === 'tidak_terlaksana'
+                    ? 'border-rose-200'
+                    : 'border-amber-200'
+                }`}
+              >
+                <span
+                  className={`font-black flex items-center gap-1.5 ${
+                    liveSummary.overallStatus === 'terlaksana_sebagian'
+                      ? 'text-teal-950'
+                      : liveSummary.overallStatus === 'tidak_terlaksana'
+                      ? 'text-rose-950'
+                      : 'text-amber-950'
+                  }`}
+                >
+                  {liveSummary.overallStatus === 'terlaksana_sebagian' ? (
+                    <CheckCircle2 className="w-4 h-4 text-teal-700" />
+                  ) : liveSummary.overallStatus === 'tidak_terlaksana' ? (
+                    <XCircle className="w-4 h-4 text-rose-600" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-amber-600" />
+                  )}
+                  <span>
+                    {liveSummary.overallStatus === 'terlaksana_sebagian'
+                      ? 'Status Program Keseluruhan: ✓ Terlaksana Sebagian'
+                      : liveSummary.overallStatus === 'tidak_terlaksana'
+                      ? 'Status Program Keseluruhan: ✕ Tidak Terlaksana'
+                      : 'Status Program: ⚠️ Belum Ada Bulan Terlaksana (Sebagian Batal)'}
+                  </span>
+                </span>
+                <span
+                  className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                    liveSummary.overallStatus === 'terlaksana_sebagian'
+                      ? 'bg-teal-200 text-teal-950'
+                      : liveSummary.overallStatus === 'tidak_terlaksana'
+                      ? 'bg-rose-200 text-rose-950'
+                      : 'bg-amber-200 text-amber-950'
+                  }`}
+                >
+                  {liveSummary.terlaksanaMonths.length} dari {liveSummary.scheduledMonths.length} Bulan Terlaksana
+                </span>
+              </div>
+
+              {/* Rincian Bulan Terlaksana vs Tidak Terlaksana */}
+              <div className="space-y-1.5">
+                {liveSummary.terlaksanaMonths.length > 0 && (
+                  <div className="text-[11px] text-emerald-950 flex items-start gap-1.5">
+                    <span className="font-bold text-emerald-700 shrink-0">✓ Bulan Selesai:</span>
+                    <span className="font-medium">{liveSummary.catatanBulanSudahTerlaksana} (Realisasi: {formatRupiah(liveSummary.totalRealisasiTerpakai)})</span>
+                  </div>
+                )}
+
+                {liveSummary.rincianTidakTerlaksana.length > 0 && (
+                  <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 space-y-1 text-rose-950 text-[11px]">
+                    <span className="font-bold text-rose-800 block">
+                      ✕ Bulan yang Tidak Terlaksana Beserta Alasannya:
+                    </span>
+                    {liveSummary.rincianTidakTerlaksana.map((item) => (
+                      <div key={item.bulan} className="flex items-start gap-1.5 pl-1">
+                        <span className="font-black text-rose-700 shrink-0">• Bulan {item.namaBulan}:</span>
+                        <span className="italic font-medium">
+                          {item.alasan ? `"${item.alasan}"` : 'Tidak ada alasan dicantumkan'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {liveSummary.belumTerlaksanaMonths.length > 0 && (
+                  <div className="text-[10.5px] text-amber-900 flex items-start gap-1.5">
+                    <span className="font-bold text-amber-700 shrink-0">⏳ Jadwal Berikutnya / Belum Terlaksana:</span>
+                    <span>Bulan {liveSummary.catatanBulanBelumTerlaksana}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* PILIHAN BULAN EVALUASI JIKA PROGRAM BERULANG / SETIAP BULAN */}
           {isBerulang && (
             <div className="p-3 bg-indigo-50/80 rounded-xl border border-indigo-200 space-y-2">
@@ -304,26 +453,52 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                   </strong>
                 </div>
 
-                <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
-                  <span className="text-[10px] text-emerald-800 block font-bold">
-                    Sisa Budget Bulan {activeBulanObj?.nama}
+                <div className={`p-2 rounded-lg border ${sisaBudgetBulanIni < 0 ? 'bg-rose-50 border-rose-300' : 'bg-emerald-50 border-emerald-200'}`}>
+                  <span className={`text-[10px] block font-bold ${sisaBudgetBulanIni < 0 ? 'text-rose-800' : 'text-emerald-800'}`}>
+                    {sisaBudgetBulanIni < 0 ? '⚠️ Pagu Minus / Defisit' : `Sisa Pagu Bulan ${activeBulanObj?.nama}`}
                   </span>
-                  <strong className="text-emerald-950 font-extrabold">{formatRupiah(sisaBudgetBulanIni)}</strong>
+                  <strong className={`font-black ${sisaBudgetBulanIni < 0 ? 'text-rose-600' : 'text-emerald-950 font-extrabold'}`}>
+                    {formatRupiah(sisaBudgetBulanIni)}
+                  </strong>
                 </div>
               </div>
             </div>
           )}
 
-          {/* 1. Pilihan Status Keterlaksanaan Program: 3 Pilihan */}
+          {/* 1. Pilihan Status Keterlaksanaan Program: 4 Pilihan */}
           <div>
             <label className="block text-xs font-bold text-slate-800 mb-1.5">
               1. Status Evaluasi Pelaksanaan Bulan {activeBulanObj?.nama}:
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button
+                type="button"
+                onClick={() => setStatusKeterlaksanaan('belum_terlaksana')}
+                className={`p-2.5 rounded-xl border text-left transition-all flex flex-col items-start gap-1.5 cursor-pointer ${
+                  statusKeterlaksanaan === 'belum_terlaksana'
+                    ? 'border-amber-500 bg-amber-50 text-amber-950 ring-2 ring-amber-500/20 shadow-2xs'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <div
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                    statusKeterlaksanaan === 'belum_terlaksana'
+                      ? 'bg-amber-500 text-white'
+                      : 'bg-white border border-slate-300 text-slate-400'
+                  }`}
+                >
+                  <AlertCircle className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-extrabold">Belum Terlaksana</h4>
+                  <p className="text-[10px] text-slate-500">Belum ada realisasi</p>
+                </div>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setStatusKeterlaksanaan('terlaksana')}
-                className={`p-2.5 rounded-xl border text-left transition-all flex items-center sm:flex-col sm:items-start gap-2 cursor-pointer ${
+                className={`p-2.5 rounded-xl border text-left transition-all flex flex-col items-start gap-1.5 cursor-pointer ${
                   statusKeterlaksanaan === 'terlaksana'
                     ? 'border-emerald-500 bg-emerald-50 text-emerald-950 ring-2 ring-emerald-500/20 shadow-2xs'
                     : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
@@ -339,15 +514,15 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                   <CheckCircle2 className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-extrabold">1. Terlaksana</h4>
-                  <p className="text-[10px] text-slate-500">Kegiatan telah selesai</p>
+                  <h4 className="text-xs font-extrabold">Terlaksana</h4>
+                  <p className="text-[10px] text-slate-500">Kegiatan selesai</p>
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setStatusKeterlaksanaan('tidak_terlaksana')}
-                className={`p-2.5 rounded-xl border text-left transition-all flex items-center sm:flex-col sm:items-start gap-2 cursor-pointer ${
+                className={`p-2.5 rounded-xl border text-left transition-all flex flex-col items-start gap-1.5 cursor-pointer ${
                   statusKeterlaksanaan === 'tidak_terlaksana'
                     ? 'border-rose-500 bg-rose-50 text-rose-950 ring-2 ring-rose-500/20 shadow-2xs'
                     : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
@@ -363,36 +538,68 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                   <XCircle className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-extrabold">2. Tidak Terlaksana</h4>
-                  <p className="text-[10px] text-slate-500">Kegiatan ditiadakan</p>
+                  <h4 className="text-xs font-extrabold">Tidak Terlaksana</h4>
+                  <p className="text-[10px] text-slate-500">Ditiadakan</p>
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setStatusKeterlaksanaan('perubahan_waktu')}
-                className={`p-2.5 rounded-xl border text-left transition-all flex items-center sm:flex-col sm:items-start gap-2 cursor-pointer ${
+                className={`p-2.5 rounded-xl border text-left transition-all flex flex-col items-start gap-1.5 cursor-pointer ${
                   statusKeterlaksanaan === 'perubahan_waktu'
-                    ? 'border-amber-500 bg-amber-50 text-amber-950 ring-2 ring-amber-500/20 shadow-2xs'
+                    ? 'border-blue-500 bg-blue-50 text-blue-950 ring-2 ring-blue-500/20 shadow-2xs'
                     : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
                 }`}
               >
                 <div
                   className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
                     statusKeterlaksanaan === 'perubahan_waktu'
-                      ? 'bg-amber-600 text-white'
+                      ? 'bg-blue-600 text-white'
                       : 'bg-white border border-slate-300 text-slate-400'
                   }`}
                 >
                   <Calendar className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-extrabold">3. Perubahan Waktu</h4>
+                  <h4 className="text-xs font-extrabold">Perubahan Waktu</h4>
                   <p className="text-[10px] text-slate-500">Jadwal bergeser</p>
                 </div>
               </button>
             </div>
           </div>
+
+          {/* 2B. JIKA PROGRAM BELUM TERLAKSANA */}
+          {statusKeterlaksanaan === 'belum_terlaksana' && (
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 space-y-2.5 text-xs animate-in fade-in">
+              <div className="flex items-center gap-2 font-black text-amber-950 text-xs sm:text-sm">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                <span>Keterangan: Belum Terlaksana</span>
+              </div>
+              <p className="text-slate-700 leading-relaxed font-medium">
+                Program kerja <strong>"{program.namaProgram}"</strong> dari <strong>{program.penanggungjawab?.divisi}</strong> belum terlaksana atau belum ada laporan hasil evaluasi pelaksanaan untuk bulan <strong>{activeBulanObj?.nama} {program.tahun}</strong>.
+              </p>
+              <div className="pt-1 flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] text-slate-500 font-semibold">Ubah status sekarang:</span>
+                <button
+                  type="button"
+                  onClick={() => setStatusKeterlaksanaan('terlaksana')}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Tandai Terlaksana &amp; Isi Realisasi</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusKeterlaksanaan('perubahan_waktu')}
+                  className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Jadwal Bergeser</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 2A. FORM JIKA PROGRAM TERLAKSANA */}
           {statusKeterlaksanaan === 'terlaksana' && (
@@ -457,8 +664,9 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                       <span>Biaya / Anggaran Terpakai:</span>
                     </label>
                     {isBerulang ? (
-                      <span className="text-[10px] text-emerald-800 font-bold">
-                        Sisa: {formatRupiah(sisaBudgetBulanIni)}
+                      <span className={`text-[10px] font-bold ${sisaBudgetBulanIni < 0 ? 'text-rose-600' : 'text-emerald-800'}`}>
+                        {sisaBudgetBulanIni < 0 ? 'Pagu Minus: ' : 'Sisa Pagu: '}
+                        {formatRupiah(sisaBudgetBulanIni)}
                       </span>
                     ) : (
                       <span className="text-[10px] text-slate-500 font-semibold">
@@ -481,8 +689,14 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
 
                   {/* Informasi Simulasi Pengurangan Anggaran */}
                   {isBerulang && (
-                    <div className="mt-1.5 p-2 rounded-lg bg-amber-50/80 border border-amber-200 text-[10px] text-amber-900 flex items-start gap-1.5">
-                      <TrendingDown className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+                    <div className={`mt-1.5 p-2 rounded-lg border text-[10px] flex items-start gap-1.5 ${
+                      sisaBudgetBulanIni - (anggaranTerpakai || 0) < 0
+                        ? 'bg-rose-50/90 border-rose-200 text-rose-950'
+                        : 'bg-amber-50/80 border-amber-200 text-amber-900'
+                    }`}>
+                      <TrendingDown className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
+                        sisaBudgetBulanIni - (anggaranTerpakai || 0) < 0 ? 'text-rose-600' : 'text-amber-700'
+                      }`} />
                       <div>
                         <span>
                           Biaya bulan {activeBulanObj?.nama} sebesar{' '}
@@ -491,8 +705,9 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                         </span>
                         <div className="mt-0.5 font-bold text-slate-700">
                           Sisa untuk bulan berikutnya:{' '}
-                          <span className="text-emerald-800">
-                            {formatRupiah(Math.max(0, sisaBudgetBulanIni - (anggaranTerpakai || 0)))}
+                          <span className={sisaBudgetBulanIni - (anggaranTerpakai || 0) < 0 ? "text-rose-600 font-black" : "text-emerald-800"}>
+                            {formatRupiah(sisaBudgetBulanIni - (anggaranTerpakai || 0))}
+                            {sisaBudgetBulanIni - (anggaranTerpakai || 0) < 0 ? ' (Pagu Minus / Defisit)' : ''}
                           </span>
                         </div>
                       </div>
@@ -613,12 +828,24 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
             <div className="space-y-3 pt-2 border-t border-slate-100 animate-in fade-in">
               <div className="p-2.5 bg-rose-50/80 border border-rose-200 rounded-xl text-[11px] text-rose-900 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>Program ditiadakan pada bulan {activeBulanObj?.nama}. Mohon cantumkan alasan.</span>
+                <span>Program ditiadakan pada bulan {activeBulanObj?.nama}. Mohon cantumkan alasan di bawah.</span>
               </div>
+
+              {isBerulang && (
+                <div className="p-3 bg-teal-50 border border-teal-300 rounded-xl text-[11px] text-teal-950 space-y-1">
+                  <div className="font-extrabold flex items-center gap-1.5 text-teal-900">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-teal-700" />
+                    <span>Catatan Khusus Program Multi-Bulan:</span>
+                  </div>
+                  <p>
+                    Karena program ini dilaksanakan dalam beberapa bulan, jika ada bulan lain yang terlaksana maka status keseluruhan akan tercatat sebagai <strong>&quot;✓ Terlaksana Sebagian&quot;</strong> beserta rincian bulan {activeBulanObj?.nama}. Jika belum ada satu pun bulan terlaksana, status tetap belum terlaksana sambil menampilkan catatan pembatalan bulan {activeBulanObj?.nama}.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Alasan Tidak Terlaksana:
+                  Alasan Tidak Terlaksana Bulan {activeBulanObj?.nama}:
                 </label>
                 <textarea
                   rows={3}
@@ -627,6 +854,9 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
                   placeholder="Contoh: Terkendala cuaca ekstrem, bentrok dengan kegiatan keuskupan, atau dana belum mencukupi..."
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:border-rose-400 focus:bg-white"
                 />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Jika dikosongkan, sistem akan melaporkan secara jujur sebagai &quot;Tidak ada alasan dicantumkan&quot;.
+                </p>
               </div>
             </div>
           )}
@@ -693,6 +923,12 @@ export const EvaluasiModal: React.FC<EvaluasiModalProps> = ({
               className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800"
             />
           </div>
+          {uploadWarning && (
+            <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-900 text-xs font-semibold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{uploadWarning}</span>
+            </div>
+          )}
         </div>
 
         {/* Footer Buttons */}

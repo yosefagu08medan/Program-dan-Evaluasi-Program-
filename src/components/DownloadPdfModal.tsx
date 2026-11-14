@@ -19,6 +19,10 @@ import {
   isDivisionMatch,
   getTipeJadwalLabel,
   getTotalAnggaranTerpakai,
+  getProgramExecutionSummary,
+  getLatestEvaluasi,
+  hasProgramEvaluasi,
+  getAuthRoleFileSlug,
 } from '../utils/formatters';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
 
@@ -91,20 +95,16 @@ export const DownloadPdfModal: React.FC<DownloadPdfModalProps> = ({
     const realisasi = getTotalAnggaranTerpakai(p);
     totalRealisasiDana += realisasi;
 
-    // Evaluasi status check
-    const hasBulanan = p.evaluasiBulanan && Object.keys(p.evaluasiBulanan).length > 0;
-    if (hasBulanan) {
-      const evValues = Object.values(p.evaluasiBulanan!);
-      const doneSome = evValues.some((v) => v.statusKeterlaksanaan === 'terlaksana');
-      const batalAll = evValues.every((v) => v.statusKeterlaksanaan === 'tidak_terlaksana');
-      if (doneSome) terlaksanaCount++;
-      else if (batalAll) tidakTerlaksanaCount++;
-      else pergeseranCount++;
-    } else if (p.evaluasi?.statusKeterlaksanaan === 'terlaksana') {
+    // Evaluasi status check konsisten dengan ringkasan keterlaksanaan
+    const summary = getProgramExecutionSummary(p);
+    const hasEval = hasProgramEvaluasi(p);
+    if (!hasEval) {
+      belumDievaluasiCount++;
+    } else if (summary.overallStatus === 'terlaksana_penuh' || summary.overallStatus === 'terlaksana_sebagian') {
       terlaksanaCount++;
-    } else if (p.evaluasi?.statusKeterlaksanaan === 'perubahan_waktu') {
+    } else if (summary.overallStatus === 'perubahan_waktu') {
       pergeseranCount++;
-    } else if (p.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana') {
+    } else if (summary.overallStatus === 'tidak_terlaksana' || summary.rincianTidakTerlaksana.length > 0) {
       tidakTerlaksanaCount++;
     } else {
       belumDievaluasiCount++;
@@ -131,10 +131,8 @@ export const DownloadPdfModal: React.FC<DownloadPdfModalProps> = ({
       map[unit].totalPagu += p.estimasiAnggaran || 0;
       map[unit].realisasi += getTotalAnggaranTerpakai(p);
       map[unit].totalProker += 1;
-      if (
-        p.evaluasi?.statusKeterlaksanaan === 'terlaksana' ||
-        (p.evaluasiBulanan && Object.values(p.evaluasiBulanan).some((v) => v.statusKeterlaksanaan === 'terlaksana'))
-      ) {
+      const summary = getProgramExecutionSummary(p);
+      if (summary.overallStatus === 'terlaksana_penuh' || summary.overallStatus === 'terlaksana_sebagian') {
         map[unit].terlaksana += 1;
       }
     });
@@ -143,7 +141,20 @@ export const DownloadPdfModal: React.FC<DownloadPdfModalProps> = ({
   }, [filteredData]);
 
   const handlePrintPdf = () => {
+    const prevTitle = document.title;
+    const roleSlug = getAuthRoleFileSlug(
+      authSession,
+      isPastorOrAdmin && adminScopeMode === 'specific' ? adminSelectedUnit : 'all'
+    );
+    const yearSlug = selectedYear === 'all' ? '2026_2027' : String(selectedYear);
+    document.title = `Laporan_Program_Kerja_${roleSlug}_${yearSlug}`;
+    const restore = () => {
+      document.title = prevTitle;
+      window.removeEventListener('afterprint', restore);
+    };
+    window.addEventListener('afterprint', restore);
     window.print();
+    setTimeout(restore, 2000);
   };
 
   const currentDateStr = new Date().toLocaleDateString('id-ID', {
@@ -602,9 +613,14 @@ export const DownloadPdfModal: React.FC<DownloadPdfModalProps> = ({
                   {filteredData.map((p, idx) => {
                     const realisasi = getTotalAnggaranTerpakai(p);
                     const sisa = Math.max(0, (p.estimasiAnggaran || 0) - realisasi);
-                    const isEvaluated =
-                      p.evaluasi?.statusKeterlaksanaan === 'terlaksana' ||
-                      (p.evaluasiBulanan && Object.values(p.evaluasiBulanan).some((v) => v.statusKeterlaksanaan === 'terlaksana'));
+                    const summary = getProgramExecutionSummary(p);
+                    const ev = getLatestEvaluasi(p);
+                    const isTerlaksanaPenuh =
+                      summary.overallStatus === 'terlaksana_penuh' ||
+                      (ev?.statusKeterlaksanaan === 'terlaksana' && summary.overallStatus !== 'terlaksana_sebagian');
+                    const isTerlaksanaSebagian = summary.overallStatus === 'terlaksana_sebagian';
+                    const isGeserWaktu = summary.overallStatus === 'perubahan_waktu' || ev?.statusKeterlaksanaan === 'perubahan_waktu';
+                    const isTidakTerlaksana = summary.overallStatus === 'tidak_terlaksana' || ev?.statusKeterlaksanaan === 'tidak_terlaksana';
 
                     return (
                       <tr key={p.id} className="hover:bg-slate-50">
@@ -641,7 +657,12 @@ export const DownloadPdfModal: React.FC<DownloadPdfModalProps> = ({
                         <td className="py-1.5 px-2">
                           <p className="font-semibold">{getTipeJadwalLabel(p.tipeJadwal)}</p>
                           <p className="text-[8.5px] text-slate-500 truncate">
-                            {p.tanggalSpesifik || (p.bulanPelaksanaan?.length ? `${p.bulanPelaksanaan.length} Bulan` : '-')}
+                            {p.tanggalSpesifik ||
+                              (p.tipeJadwal === 'akan_ditentukan'
+                                ? 'Akan ditentukan kemudian'
+                                : p.bulanPelaksanaan?.length
+                                ? `${p.bulanPelaksanaan.length} Bulan`
+                                : '-')}
                           </p>
                         </td>
                         <td className="py-1.5 px-2 text-right font-semibold tabular-nums text-slate-800">
@@ -654,17 +675,25 @@ export const DownloadPdfModal: React.FC<DownloadPdfModalProps> = ({
                           {formatRupiah(sisa)}
                         </td>
                         <td className="py-1.5 px-1.5 text-center">
-                          {isEvaluated || (p.isLuarRancangan && p.status === 'selesai') ? (
+                          {isTerlaksanaSebagian ? (
+                            <span className="inline-block px-1.5 py-0.5 rounded font-black text-[8px] bg-teal-100 text-teal-950 border border-teal-300">
+                              ✓ Terlaksana Sebagian ({summary.terlaksanaMonths.length}/{summary.scheduledMonths.length} Bln)
+                            </span>
+                          ) : isTerlaksanaPenuh || (p.isLuarRancangan && p.status === 'selesai') ? (
                             <span className="inline-block px-1.5 py-0.5 rounded font-black text-[8px] bg-emerald-100 text-emerald-900 border border-emerald-300">
                               {p.isLuarRancangan ? '✓ Terlaksana (Insidental)' : '✓ Terlaksana'}
                             </span>
-                          ) : p.evaluasi?.statusKeterlaksanaan === 'perubahan_waktu' ? (
+                          ) : isGeserWaktu ? (
                             <span className="inline-block px-1.5 py-0.5 rounded font-bold text-[8px] bg-amber-100 text-amber-900 border border-amber-300">
                               ⏳ Geser Waktu
                             </span>
-                          ) : p.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana' ? (
+                          ) : isTidakTerlaksana ? (
                             <span className="inline-block px-1.5 py-0.5 rounded font-bold text-[8px] bg-rose-100 text-rose-900 border border-rose-300">
                               ✕ Ditiadakan
+                            </span>
+                          ) : summary.rincianTidakTerlaksana.length > 0 ? (
+                            <span className="inline-block px-1.5 py-0.5 rounded font-bold text-[8px] bg-amber-100 text-amber-950 border border-amber-300">
+                              ⚠️ Sebagian Batal
                             </span>
                           ) : (
                             <span className="inline-block px-1.5 py-0.5 rounded font-semibold text-[8px] bg-slate-100 text-slate-600">

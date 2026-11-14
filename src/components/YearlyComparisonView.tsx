@@ -32,6 +32,9 @@ import {
   formatRupiah,
   getStatusInfo,
   isDivisionMatch,
+  getProgramExecutionSummary,
+  getLatestEvaluasi,
+  hasProgramEvaluasi,
 } from '../utils/formatters';
 import { MASTER_DIVISIONS } from '../../database/master-data/divisions';
 
@@ -93,26 +96,29 @@ export const YearlyComparisonView: React.FC<YearlyComparisonViewProps> = ({
       const budget2026 = progs2026.reduce((sum, p) => sum + (p.estimasiAnggaran || 0), 0);
       const terlaksana2026 = progs2026.filter((p) => {
         if (p.status === 'selesai') return true;
-        if (p.evaluasi?.statusKeterlaksanaan === 'terlaksana') return true;
-        if (p.evaluasiBulanan && Object.values(p.evaluasiBulanan).some((e) => e.statusKeterlaksanaan === 'terlaksana')) return true;
-        return false;
+        const sum26 = getProgramExecutionSummary(p);
+        return sum26.overallStatus === 'terlaksana_penuh' || sum26.overallStatus === 'terlaksana_sebagian';
       }).length;
 
       const tidakTerlaksana2026 = progs2026.filter((p) => {
         if (p.status === 'ditunda') return true;
-        if (p.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana') return true;
-        return false;
+        const sum26 = getProgramExecutionSummary(p);
+        return sum26.overallStatus === 'tidak_terlaksana';
       }).length;
 
       const adaKendala2026 = progs2026.filter((p) => {
-        const alasan = p.evaluasi?.alasanTidakTerlaksana || p.evaluasi?.alasanPerubahanWaktu;
-        return Boolean(alasan && alasan.trim().length > 0);
+        const sum26 = getProgramExecutionSummary(p);
+        const ev26 = getLatestEvaluasi(p);
+        const alasan = ev26?.alasanTidakTerlaksana || ev26?.alasanPerubahanWaktu;
+        return sum26.rincianTidakTerlaksana.length > 0 || Boolean(alasan && alasan.trim().length > 0);
       }).length;
 
-      // Metrik 2027
-      const count2027 = progs2027.length;
-      const budget2027 = progs2027.reduce((sum, p) => sum + (p.estimasiAnggaran || 0), 0);
-      const lanjutanCount2027 = progs2027.filter((p) => Boolean(p.programLanjutanDariId || p.namaProgram2026Asal)).length;
+      // Metrik 2027 (Program yang ditolak DPP tidak masuk ke program final seksi)
+      const progs2027Final = progs2027.filter((p) => p.catatanPastorParoki?.statusPersetujuan !== 'ditolak');
+      const count2027 = progs2027Final.length;
+      const budget2027 = progs2027Final.reduce((sum, p) => sum + (p.estimasiAnggaran || 0), 0);
+      const ditolak2027 = progs2027.filter((p) => p.catatanPastorParoki?.statusPersetujuan === 'ditolak').length;
+      const lanjutanCount2027 = progs2027Final.filter((p) => Boolean(p.programLanjutanDariId || p.namaProgram2026Asal)).length;
 
       // Filter pencarian dan status jika diterapkan
       const filteredProgs2026 = progs2026.filter((p) => {
@@ -123,14 +129,16 @@ export const YearlyComparisonView: React.FC<YearlyComparisonViewProps> = ({
           if (!matchName && !matchTujuan) return false;
         }
 
+        const sum26 = getProgramExecutionSummary(p);
+        const ev26 = getLatestEvaluasi(p);
         if (statusFilter2026 === 'terlaksana') {
-          return p.status === 'selesai' || p.evaluasi?.statusKeterlaksanaan === 'terlaksana';
+          return p.status === 'selesai' || sum26.overallStatus === 'terlaksana_penuh' || sum26.overallStatus === 'terlaksana_sebagian';
         }
         if (statusFilter2026 === 'tidak_terlaksana') {
-          return p.status === 'ditunda' || p.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana';
+          return p.status === 'ditunda' || sum26.overallStatus === 'tidak_terlaksana';
         }
         if (statusFilter2026 === 'kendala') {
-          return Boolean(p.evaluasi?.alasanTidakTerlaksana || p.evaluasi?.alasanPerubahanWaktu);
+          return sum26.rincianTidakTerlaksana.length > 0 || Boolean(ev26?.alasanTidakTerlaksana || ev26?.alasanPerubahanWaktu);
         }
         return true;
       });
@@ -145,6 +153,7 @@ export const YearlyComparisonView: React.FC<YearlyComparisonViewProps> = ({
         count2027,
         budget2027,
         lanjutanCount2027,
+        ditolakCount2027: ditolak2027,
         diffBudget: budget2027 - budget2026,
         progs2026: filteredProgs2026,
         progs2027,
@@ -448,9 +457,17 @@ export const YearlyComparisonView: React.FC<YearlyComparisonViewProps> = ({
                   ) : (
                     <div className="space-y-3">
                       {group.progs2026.map((prog) => {
-                        const isSelesai = prog.status === 'selesai' || prog.evaluasi?.statusKeterlaksanaan === 'terlaksana';
-                        const isDitunda = prog.status === 'ditunda' || prog.evaluasi?.statusKeterlaksanaan === 'tidak_terlaksana';
-                        const kendala = prog.evaluasi?.alasanTidakTerlaksana || prog.evaluasi?.alasanPerubahanWaktu;
+                        const summary = getProgramExecutionSummary(prog);
+                        const latestEv = getLatestEvaluasi(prog);
+                        const hasEval = hasProgramEvaluasi(prog);
+                        const isSebagian = summary.overallStatus === 'terlaksana_sebagian';
+                        const isSelesai = summary.overallStatus === 'terlaksana_penuh' || prog.status === 'selesai' || (!isSebagian && latestEv?.statusKeterlaksanaan === 'terlaksana');
+                        const isDitunda = summary.overallStatus === 'tidak_terlaksana' || prog.status === 'ditunda' || latestEv?.statusKeterlaksanaan === 'tidak_terlaksana';
+                        const isGeser = summary.overallStatus === 'perubahan_waktu' || latestEv?.statusKeterlaksanaan === 'perubahan_waktu';
+                        const kendala =
+                          (summary.rincianTidakTerlaksana.length > 0 ? summary.catatanBulanTidakTerlaksana : '') ||
+                          latestEv?.alasanTidakTerlaksana ||
+                          latestEv?.alasanPerubahanWaktu;
 
                         return (
                           <div
@@ -460,15 +477,28 @@ export const YearlyComparisonView: React.FC<YearlyComparisonViewProps> = ({
                             <div className="flex items-start justify-between gap-2">
                               <div>
                                 <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                                  {isSelesai ? (
+                                  {isSebagian ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-teal-100 text-teal-950 flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      Terlaksana Sebagian ({summary.terlaksanaMonths.length}/{summary.scheduledMonths.length} Bln)
+                                    </span>
+                                  ) : isSelesai ? (
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 flex items-center gap-1">
                                       <CheckCircle2 className="w-3 h-3" />
                                       Terlaksana
+                                    </span>
+                                  ) : isGeser ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900 flex items-center gap-1">
+                                      ⏳ Geser Waktu
                                     </span>
                                   ) : isDitunda ? (
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 flex items-center gap-1">
                                       <XCircle className="w-3 h-3" />
                                       Tidak Terlaksana
+                                    </span>
+                                  ) : summary.rincianTidakTerlaksana.length > 0 ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-950">
+                                      ⚠️ Sudah Dievaluasi ({summary.rincianTidakTerlaksana.length} Bln Batal)
                                     </span>
                                   ) : (
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
@@ -499,7 +529,11 @@ export const YearlyComparisonView: React.FC<YearlyComparisonViewProps> = ({
                               <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                               <span>
                                 Bulan:{' '}
-                                {prog.bulanPelaksanaan?.map((b) => BULAN_LIST[b - 1]?.singkatan || '').join(', ') || '1x'}
+                                {prog.bulanPelaksanaan && prog.bulanPelaksanaan.length > 0
+                                  ? prog.bulanPelaksanaan.map((b) => BULAN_LIST[b - 1]?.singkatan || '').join(', ')
+                                  : prog.tipeJadwal === 'akan_ditentukan'
+                                  ? 'Akan Ditentukan Kemudian'
+                                  : 'Belum Ditentukan'}
                               </span>
                               {prog.tanggalSpesifik && (
                                 <span className="text-slate-400">({prog.tanggalSpesifik})</span>
@@ -517,10 +551,10 @@ export const YearlyComparisonView: React.FC<YearlyComparisonViewProps> = ({
                                   {kendala}
                                 </p>
                               </div>
-                            ) : prog.evaluasi?.penjelasanKegiatan ? (
+                            ) : latestEv?.penjelasanKegiatan ? (
                               <div className="p-2 rounded-lg bg-emerald-50/60 border border-emerald-100 text-[11px] text-emerald-950">
                                 <span className="font-bold text-emerald-800">Catatan Pelaksanaan: </span>
-                                {prog.evaluasi.penjelasanKegiatan}
+                                {latestEv.penjelasanKegiatan}
                               </div>
                             ) : null}
 
@@ -532,7 +566,7 @@ export const YearlyComparisonView: React.FC<YearlyComparisonViewProps> = ({
                                 className="text-[11px] font-bold text-blue-700 hover:text-blue-900 flex items-center gap-1 cursor-pointer"
                               >
                                 <MessageSquare className="w-3 h-3" />
-                                <span>{prog.evaluasi ? 'Edit Evaluasi' : '+ Isi Evaluasi'}</span>
+                                <span>{hasEval ? 'Edit Evaluasi' : '+ Isi Evaluasi'}</span>
                               </button>
 
                               <button
@@ -702,7 +736,12 @@ export const YearlyComparisonView: React.FC<YearlyComparisonViewProps> = ({
                             {/* Tombol Detail */}
                             <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                               <span className="text-[10.5px] text-slate-500 font-medium">
-                                Jadwal: Bulan {prog.bulanPelaksanaan?.map((b) => BULAN_LIST[b - 1]?.singkatan || '').join(', ')}
+                                Jadwal:{' '}
+                                {prog.bulanPelaksanaan && prog.bulanPelaksanaan.length > 0
+                                  ? `Bulan ${prog.bulanPelaksanaan.map((b) => BULAN_LIST[b - 1]?.singkatan || '').join(', ')}`
+                                  : prog.tipeJadwal === 'akan_ditentukan'
+                                  ? 'Akan Ditentukan Kemudian'
+                                  : 'Belum Ditentukan'}
                               </span>
 
                               <button

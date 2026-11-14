@@ -36,15 +36,28 @@ export interface DatabaseMetadata {
   schemaVersion: number;
 }
 
-// Clean undefined properties so Firestore doesn't reject them
+// Clean undefined properties so Firestore doesn't reject them (including inside arrays)
+function sanitizeValueForFirestore(value: any): any {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeValueForFirestore(item))
+      .filter((item) => item !== undefined);
+  }
+  if (typeof value === 'object') {
+    return sanitizeForFirestore(value);
+  }
+  return value;
+}
+
 function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
   const result: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (value !== undefined) {
-      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        result[key] = sanitizeForFirestore(value);
-      } else {
-        result[key] = value;
+      const cleaned = sanitizeValueForFirestore(value);
+      if (cleaned !== undefined) {
+        result[key] = cleaned;
       }
     }
   }
@@ -836,41 +849,38 @@ class DatabaseService {
       return INITIAL_PENERIMAAN_MINGGUAN;
     }
 
-    // Sanitasi otomatis: hilangkan angka realisasi palsu/dummy dari data awal yang belum pernah diinput pengguna
-    const isRealisasiSanitized = this.readStorage<boolean>('proker_db_realisasi_sanitized_v4', false);
-    let workingList = cached;
-    if (!isRealisasiSanitized) {
-      workingList = cached.map((item) => {
-        let nama = item.namaPenerimaan;
-        let alokasi = item.alokasiSeksi;
-        let realisasiVal = item.realisasi;
+    // Sanitasi otomatis: pastikan jika belum ada input manual oleh pengguna, realisasi strictly 0
+    let workingList = cached.map((item) => {
+      let nama = item.namaPenerimaan;
+      let alokasi = item.alokasiSeksi;
+      let realisasiVal = item.isRealisasiManual ? (item.realisasi || 0) : 0;
 
-        // Reset data seed yang memiliki angka realisasi bawaan dummy
-        if (item.id.startsWith('pen_2026_') || item.id.startsWith('pen_2027_')) {
-          realisasiVal = 0;
-          if (alokasi === 'Seksi PSE') {
-            const nLower = (nama || '').toLowerCase();
-            if (nLower.includes('app') || nLower.includes('puasa')) {
-              nama = 'Dana Aksi Puasa Pembangunan';
-            } else if (nLower.includes('natal')) {
-              nama = 'Amplop Natal';
-            } else if (nLower.includes('kolekte') || item.kategori === 'kolekte_khusus') {
-              alokasi = 'Umum Paroki';
-            } else {
-              nama = 'Dana Solidaritas Umat';
-            }
-          }
+      // Seksi Liturgi tidak pernah memiliki input penerimaan kas mandiri; semua kolekte dialihkan ke kas Umum Paroki
+      if (alokasi === 'Seksi Liturgi') {
+        alokasi = 'Umum Paroki';
+      }
+
+      if (alokasi === 'Seksi PSE') {
+        const nLower = (nama || '').toLowerCase();
+        if (nLower.includes('app') || nLower.includes('puasa')) {
+          nama = 'Dana Aksi Puasa Pembangunan';
+        } else if (nLower.includes('natal')) {
+          nama = 'Amplop Natal';
+        } else if (nLower.includes('kolekte') || item.kategori === 'kolekte_khusus') {
+          alokasi = 'Umum Paroki';
+        } else if (!nama) {
+          nama = 'Dana Solidaritas Umat';
         }
-        return {
-          ...item,
-          namaPenerimaan: nama,
-          alokasiSeksi: alokasi,
-          realisasi: realisasiVal,
-        };
-      });
-      this.writeStorage('proker_db_realisasi_sanitized_v4', true);
-      this.writeStorage(PENERIMAAN_STORAGE_KEY, workingList);
-    }
+      }
+
+      return {
+        ...item,
+        namaPenerimaan: nama,
+        alokasiSeksi: alokasi,
+        realisasi: realisasiVal,
+      };
+    });
+    this.writeStorage(PENERIMAAN_STORAGE_KEY, workingList);
 
     // Filter out phantom routine weeks (e.g. routine Kolekte 1 & 2 for Minggu 5 in January 2026 which only has 4 Sundays)
     const valid = workingList.filter((item) => {
@@ -909,6 +919,8 @@ class DatabaseService {
     let updated: PenerimaanMingguan[];
     const itemWithTimestamps: PenerimaanMingguan = {
       ...item,
+      isRealisasiManual: (item.realisasi && item.realisasi > 0) ? true : Boolean(item.isRealisasiManual),
+      realisasi: item.realisasi || 0,
       updatedAt: new Date().toISOString(),
       createdAt: item.createdAt || new Date().toISOString(),
     };
@@ -986,6 +998,15 @@ class DatabaseService {
                   deleteDoc(d.ref).catch(() => {});
                   return;
                 }
+              }
+              // Enforce realisasi 0 jika belum ada manual input
+              if (!item.isRealisasiManual) {
+                item.realisasi = 0;
+              }
+              // Seksi Liturgi tidak pernah memiliki input penerimaan kas mandiri; migrasikan ke kas Umum Paroki
+              if (item.alokasiSeksi === 'Seksi Liturgi') {
+                item.alokasiSeksi = 'Umum Paroki';
+                setDoc(d.ref, sanitizeForFirestore(item), { merge: true }).catch(() => {});
               }
               cloudItems.push(item);
             });

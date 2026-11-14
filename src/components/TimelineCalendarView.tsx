@@ -24,10 +24,11 @@ export const TimelineCalendarView: React.FC<TimelineCalendarViewProps> = ({
     return true;
   });
 
-  // Programs active in the currently selected month
-  const programsInActiveMonth = filteredPrograms.filter((p) =>
-    p.bulanPelaksanaan?.includes(activeMonth)
-  );
+  // Programs active in the currently selected month (or unscheduled when filter is 'akan_ditentukan')
+  const programsInActiveMonth =
+    scheduleFilter === 'akan_ditentukan'
+      ? filteredPrograms
+      : filteredPrograms.filter((p) => p.bulanPelaksanaan?.includes(activeMonth));
 
   // Compute count of programs per month
   const monthCounts = BULAN_LIST.map((m) => {
@@ -44,6 +45,7 @@ export const TimelineCalendarView: React.FC<TimelineCalendarViewProps> = ({
           { id: 'sepanjang_tahun', label: 'Sepanjang Tahun' },
           { id: 'multi_bulan', label: 'Multi Bulan' },
           { id: 'satu_kali', label: 'Satu Kali' },
+          { id: 'akan_ditentukan', label: 'Akan Ditentukan' },
         ].map((tab) => (
           <button
             key={tab.id}
